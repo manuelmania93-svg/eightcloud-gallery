@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK }
+enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
 enum class Screen { GRID, VIEWER, SETTINGS, BACKUP }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
@@ -71,7 +71,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     val favorites: StateFlow<Set<Long>> = _favorites
 
     private val _themeMode = MutableStateFlow(
-        runCatching { ThemeMode.valueOf(prefs.getString("themeMode", "SYSTEM")!!) }.getOrDefault(ThemeMode.SYSTEM)
+        runCatching { ThemeMode.valueOf(prefs.getString("themeMode", "CLOUD_SKY")!!) }.getOrDefault(ThemeMode.SYSTEM)
     )
     val themeMode: StateFlow<ThemeMode> = _themeMode
 

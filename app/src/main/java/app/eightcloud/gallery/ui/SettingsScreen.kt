@@ -118,6 +118,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
             Text("Theme", style = MaterialTheme.typography.titleMedium)
+            sortChoice("Cloud sky (default)", themeMode == ThemeMode.CLOUD_SKY) { viewModel.setThemeMode(ThemeMode.CLOUD_SKY) }
             sortChoice("System", themeMode == ThemeMode.SYSTEM) { viewModel.setThemeMode(ThemeMode.SYSTEM) }
             sortChoice("Light", themeMode == ThemeMode.LIGHT) { viewModel.setThemeMode(ThemeMode.LIGHT) }
             sortChoice("Dark", themeMode == ThemeMode.DARK) { viewModel.setThemeMode(ThemeMode.DARK) }

@@ -37,6 +37,20 @@ private val DarkColors = darkColorScheme(
     onSurfaceVariant = Color(0xFFB9CCDC)
 )
 
+private val CloudSkyColors = lightColorScheme(
+    primary = Color(0xFF2E86D4),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFCBE6FF),
+    onPrimaryContainer = Color(0xFF0A3A66),
+    secondary = Color(0xFF6FB6F2),
+    background = Color(0xFFF6FBFF),
+    onBackground = Color(0xFF12395B),
+    surface = Color(0xFFF6FBFF),
+    onSurface = Color(0xFF12395B),
+    surfaceVariant = Color(0xFFDDEEFF),
+    onSurfaceVariant = Color(0xFF41719E)
+)
+
 private val CloudShapes = Shapes(
     small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(18.dp),
@@ -45,13 +59,14 @@ private val CloudShapes = Shapes(
 
 @Composable
 fun EightCloudTheme(mode: ThemeMode, content: @Composable () -> Unit) {
-    val dark = when (mode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
+    val scheme = when (mode) {
+        ThemeMode.CLOUD_SKY -> CloudSkyColors
+        ThemeMode.SYSTEM -> if (isSystemInDarkTheme()) DarkColors else LightColors
+        ThemeMode.LIGHT -> LightColors
+        ThemeMode.DARK -> DarkColors
     }
     MaterialTheme(
-        colorScheme = if (dark) DarkColors else LightColors,
+        colorScheme = scheme,
         shapes = CloudShapes,
         content = content
     )
