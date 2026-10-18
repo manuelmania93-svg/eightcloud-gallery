@@ -75,6 +75,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -433,6 +434,7 @@ private fun bubbleLabelOf(entry: GridEntry?, field: SortField): String = when (e
     }
     null -> ""
 }
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaThumb(
     item: MediaItem,
