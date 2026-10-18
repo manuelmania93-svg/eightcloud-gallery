@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * One row per known media file. The content hash is the identity: a renamed
@@ -26,7 +28,8 @@ data class BackupEntry(
     val telegramMessageIds: String, // comma-separated chunk message ids in Saved Messages
     val chunkIvs: String, // comma-separated hex ivs, one per chunk
     val uploadedAt: Long,
-    val lastSeenAt: Long
+    val lastSeenAt: Long,
+    val errorMessage: String = ""
 ) {
     companion object {
         const val PENDING = "PENDING"
@@ -34,6 +37,7 @@ data class BackupEntry(
         const val BACKED_UP = "BACKED_UP"
         const val CLOUD_ONLY = "CLOUD_ONLY"
         const val MISSING_IN_CLOUD = "MISSING_IN_CLOUD"
+        const val FAILED = "FAILED"
     }
 }
 
@@ -65,13 +69,28 @@ interface BackupDao {
 
     @Query("SELECT COUNT(*) FROM backup_index WHERE status = 'BACKED_UP' OR status = 'CLOUD_ONLY'")
     suspend fun backedUpCount(): Int
+
+    @Query("UPDATE backup_index SET status = 'FAILED', errorMessage = :message WHERE contentHash = :hash")
+    suspend fun markFailed(hash: String, message: String)
+
+    @Query("UPDATE backup_index SET status = 'PENDING', errorMessage = '' WHERE status = 'FAILED'")
+    suspend fun resetFailed(): Int
+
+    @Query("SELECT * FROM backup_index WHERE status = 'PENDING' AND mediaStoreId IN (:ids)")
+    suspend fun pendingByIds(ids: List<Long>): List<BackupEntry>
 }
 
-@Database(entities = [BackupEntry::class], version = 1, exportSchema = false)
+@Database(entities = [BackupEntry::class], version = 2, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
 
     companion object {
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE backup_index ADD COLUMN errorMessage TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile private var instance: BackupDb? = null
 
         fun get(context: Context): BackupDb = instance ?: synchronized(this) {
@@ -79,7 +98,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
         }
     }
 }

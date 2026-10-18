@@ -10,6 +10,7 @@ import app.eightcloud.gallery.crypto.KeystoreKeys
 import app.eightcloud.gallery.data.Hasher
 import app.eightcloud.gallery.data.MediaItem
 import app.eightcloud.gallery.data.MediaStoreSource
+import kotlinx.coroutines.flow.MutableStateFlow
 import app.eightcloud.gallery.telegram.TdClient
 import app.eightcloud.gallery.telegram.TdException
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,20 @@ import java.io.FileOutputStream
  * Drives the backup pipeline: scan -> hash -> encrypt -> upload -> index.
  * Identity is the SHA-256 of the content, so renames/moves never re-upload.
  */
+/** Process-wide live upload progress, observed by the backup screen. */
+object BackupProgress {
+    data class State(
+        val running: Boolean,
+        val done: Int,
+        val total: Int,
+        val bytesDone: Long,
+        val bytesTotal: Long,
+        val currentName: String
+    )
+
+    val state = MutableStateFlow(State(false, 0, 0, 0L, 0L, ""))
+}
+
 class BackupEngine(private val context: Context) {
 
     private val db = BackupDb.get(context)
@@ -35,13 +50,17 @@ class BackupEngine(private val context: Context) {
     /** One upload chunk stays well under the 2 GB Telegram document limit. */
     private val chunkSizeBytes = 1_500_000_000L
 
-    /** Adds files that are new to the index as PENDING. Returns the new count. */
-    suspend fun scan(): Int = withContext(Dispatchers.IO) {
+    /**
+     * Adds files that are new to the index as PENDING. Returns the new count.
+     * When [onlyIds] is given (manual targeted run), the folder-scope setting
+     * is bypassed for those files.
+     */
+    suspend fun scan(onlyIds: Set<Long>? = null): Int = withContext(Dispatchers.IO) {
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         val selectedOnly = prefs.getString("backupScope", "ALL") == "SELECTED"
         val buckets = prefs.getStringSet("backupBuckets", emptySet()) ?: emptySet()
         val items = MediaStoreSource.query(context)
-            .filter { !selectedOnly || it.bucket in buckets }
+            .filter { if (onlyIds != null) it.id in onlyIds else (!selectedOnly || it.bucket in buckets) }
         var added = 0
         val now = System.currentTimeMillis()
         for (item in items) {
@@ -70,20 +89,58 @@ class BackupEngine(private val context: Context) {
     }
 
     /**
-     * Uploads every PENDING entry, one at a time.
-     * [onProgress] gets (done, total) after each finished file.
+     * Uploads every PENDING entry, one at a time. A file that fails is marked
+     * FAILED with its reason and the run continues with the next file.
+     * [onProgress] gets (done, total, bytesDone, bytesTotal, currentName).
      */
-    suspend fun uploadPending(onProgress: (done: Int, total: Int, currentName: String) -> Unit = { _, _, _ -> }) =
-        withContext(Dispatchers.IO) {
-            val pending = db.dao().byStatus(BackupEntry.PENDING)
-            val total = pending.size
-            val chatId = td.savedMessagesChatId()
-            pending.forEachIndexed { index, entry ->
-                onProgress(index, total, entry.name)
+    suspend fun uploadPending(
+        onlyIds: Set<Long>? = null,
+        onProgress: (done: Int, total: Int, bytesDone: Long, bytesTotal: Long, currentName: String) -> Unit = { _, _, _, _, _ -> }
+    ) = withContext(Dispatchers.IO) {
+        val pending = if (onlyIds == null) db.dao().byStatus(BackupEntry.PENDING)
+        else db.dao().pendingByIds(onlyIds.toList())
+        val total = pending.size
+        val totalBytes = pending.sumOf { it.sizeBytes }
+        var doneBytes = 0L
+        val chatId = td.savedMessagesChatId()
+        BackupProgress.state.value = BackupProgress.State(true, 0, total, 0L, totalBytes, "")
+        pending.forEachIndexed { index, entry ->
+            onProgress(index, total, doneBytes, totalBytes, entry.name)
+            BackupProgress.state.value =
+                BackupProgress.State(true, index, total, doneBytes, totalBytes, entry.name)
+            try {
                 uploadOne(entry, chatId)
-                onProgress(index + 1, total, entry.name)
+            } catch (e: Exception) {
+                db.dao().markFailed(entry.contentHash, e.message ?: e.javaClass.simpleName)
             }
+            doneBytes += entry.sizeBytes
+            onProgress(index + 1, total, doneBytes, totalBytes, entry.name)
+            BackupProgress.state.value =
+                BackupProgress.State(true, index + 1, total, doneBytes, totalBytes, entry.name)
         }
+        BackupProgress.state.value = BackupProgress.State(false, total, total, totalBytes, totalBytes, "")
+    }
+
+    /** FAILED entries with their recorded reasons. */
+    suspend fun failed(): List<BackupEntry> = withContext(Dispatchers.IO) {
+        db.dao().byStatus(BackupEntry.FAILED)
+    }
+
+    /** Resets all FAILED entries to PENDING so the next run picks them up. */
+    suspend fun retryFailed(): Int = withContext(Dispatchers.IO) {
+        db.dao().resetFailed()
+    }
+
+    /** BACKED_UP entries whose local copy still exists: (content uri, sizeBytes). */
+    suspend fun backedUpLocal(): List<Pair<android.net.Uri, Long>> = withContext(Dispatchers.IO) {
+        db.dao().byStatus(BackupEntry.BACKED_UP).mapNotNull { entry ->
+            val uri = uriFor(entry)
+            val exists = runCatching {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { } != null
+            }.getOrDefault(false)
+            if (exists) uri to entry.sizeBytes else null
+        }
+    }
 
     private suspend fun uploadOne(entry: BackupEntry, chatId: Long) {
         db.dao().setStatus(entry.contentHash, BackupEntry.UPLOADING)
