@@ -16,6 +16,8 @@ android {
         versionCode 1
         versionName "0.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField "String", "TELEGRAM_API_ID", "\"${System.getenv('TELEGRAM_API_ID') ?: ''}\""
+        buildConfigField "String", "TELEGRAM_API_HASH", "\"${System.getenv('TELEGRAM_API_HASH') ?: ''}\""
     }
 
     buildTypes {
@@ -35,6 +37,7 @@ android {
     }
     buildFeatures {
         compose true
+        buildConfig true
     }
     testOptions {
         unitTests.returnDefaultValues = true
