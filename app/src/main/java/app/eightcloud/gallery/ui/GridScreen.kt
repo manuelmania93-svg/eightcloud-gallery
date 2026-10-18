@@ -314,3 +314,77 @@ private fun bubbleLabelOf(entry: GridEntry?): String = when (entry) {
         .atZone(ZoneId.systemDefault()).toLocalDate().format(fullDateFormatter)
     null -> ""
 }
+@Composable
+private fun MediaThumb(item: MediaItem, status: String?, isFavorite: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+    ) {
+        AsyncImage(
+            model = item.uri,
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(5.dp)
+                .size(20.dp)
+                .background(Color.Black.copy(alpha = 0.35f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            val (badgeIcon, badgeTint, badgeDesc) = when (status) {
+                BackupEntry.BACKED_UP -> Triple(Icons.Filled.Check, Color(0xFF7BE3A8), "Backed up")
+                BackupEntry.CLOUD_ONLY -> Triple(Icons.Filled.KeyboardArrowDown, Color(0xFF9CC8EC), "Cloud only")
+                BackupEntry.MISSING_IN_CLOUD -> Triple(Icons.Filled.Warning, Color(0xFFE2A455), "Missing in cloud")
+                else -> Triple(Icons.Filled.Phone, Color.White, "Local only")
+            }
+            Icon(
+                imageVector = badgeIcon,
+                contentDescription = badgeDesc,
+                tint = badgeTint,
+                modifier = Modifier.size(12.dp)
+            )
+        }
+        if (isFavorite) {
+            Icon(
+                imageVector = Icons.Filled.Favorite,
+                contentDescription = "Favorite",
+                tint = Color(0xFFE2557A),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(5.dp)
+                    .size(18.dp)
+            )
+        }
+        if (item.isVideo) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(5.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "Video",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = DetailsLoader.formatDuration(item.durationMs),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+    }
+}

@@ -2,7 +2,10 @@ package app.eightcloud.gallery.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -155,12 +158,31 @@ private fun PhotoPage(item: MediaItem) {
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 5f)
-                    if (scale > 1f) {
-                        offsetX += pan.x
-                        offsetY += pan.y
-                    } else {
+                // Only consume gestures while zoomed or when pinching (2+ pointers);
+                // single-finger swipes at 1x must stay unconsumed so the pager pages.
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.none { it.pressed }) break
+                        val pressedCount = event.changes.count { it.pressed }
+                        if (pressedCount > 1 || scale > 1.01f) {
+                            val zoom = event.calculateZoom()
+                            val pan = event.calculatePan()
+                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            if (scale > 1.01f) {
+                                offsetX += pan.x
+                                offsetY += pan.y
+                            } else {
+                                scale = 1f
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+                    }
+                    if (scale <= 1.01f) {
+                        scale = 1f
                         offsetX = 0f
                         offsetY = 0f
                     }
