@@ -388,3 +388,20 @@ private fun MediaThumb(item: MediaItem, status: String?, isFavorite: Boolean, on
         }
     }
 }
+
+@Composable
+private fun SortOption(
+    label: String,
+    field: SortField,
+    ascending: Boolean,
+    currentField: SortField,
+    currentAscending: Boolean,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = {
+            Text(if (field == currentField && ascending == currentAscending) "$label  ✓" else label)
+        },
+        onClick = onClick
+    )
+}
