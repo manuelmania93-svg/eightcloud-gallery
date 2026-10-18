@@ -102,14 +102,19 @@ class BackupEngine(private val context: Context) {
         val total = pending.size
         val totalBytes = pending.sumOf { it.sizeBytes }
         var doneBytes = 0L
-        val chatId = td.savedMessagesChatId()
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val destChat = prefs.getLong("destChatId", 0L).takeIf { it != 0L } ?: td.savedMessagesChatId()
+        val toGroup = prefs.getLong("destChatId", 0L) != 0L
+        val topicPics = prefs.getLong("topicPics", 0L).takeIf { it != 0L }
+        val topicVids = prefs.getLong("topicVids", 0L).takeIf { it != 0L }
         BackupProgress.state.value = BackupProgress.State(true, 0, total, 0L, totalBytes, "")
         pending.forEachIndexed { index, entry ->
             onProgress(index, total, doneBytes, totalBytes, entry.name)
             BackupProgress.state.value =
                 BackupProgress.State(true, index, total, doneBytes, totalBytes, entry.name)
             try {
-                uploadOne(entry, chatId)
+                val thread = if (toGroup) (if (entry.isVideo) topicVids else topicPics) else null
+                uploadOne(entry, destChat, thread)
             } catch (e: Exception) {
                 db.dao().markFailed(entry.contentHash, e.message ?: e.javaClass.simpleName)
             }
@@ -142,7 +147,7 @@ class BackupEngine(private val context: Context) {
         }
     }
 
-    private suspend fun uploadOne(entry: BackupEntry, chatId: Long) {
+    private suspend fun uploadOne(entry: BackupEntry, chatId: Long, threadId: Long? = null) {
         db.dao().setStatus(entry.contentHash, BackupEntry.UPLOADING)
         val uri = uriFor(entry)
         val key = KeystoreKeys.backupKey()
@@ -154,24 +159,24 @@ class BackupEngine(private val context: Context) {
                     BackupCrypto.encryptStream(key, iv, input, output)
                 }
             } ?: throw TdException(0, "cannot read local file")
-            uploadChunks(chatId, encrypted, entry, listOf(iv))
+            uploadChunks(chatId, encrypted, entry, listOf(iv), threadId)
         } finally {
             encrypted.delete()
         }
     }
 
-    private suspend fun uploadChunks(chatId: Long, encrypted: File, entry: BackupEntry, ivs: List<ByteArray>) {
+    private suspend fun uploadChunks(chatId: Long, encrypted: File, entry: BackupEntry, ivs: List<ByteArray>, threadId: Long? = null) {
         val size = encrypted.length()
         val messageIds = mutableListOf<Long>()
         val captionBase = entry.contentHash.take(12) + " " + entry.name
         if (size <= chunkSizeBytes) {
-            val msg = td.uploadDocument(chatId, encrypted.absolutePath, captionBase)
+            val msg = td.uploadDocument(chatId, encrypted.absolutePath, captionBase, threadId)
             messageIds.add(msg.id)
         } else {
             val parts = splitFile(encrypted, chunkSizeBytes)
             try {
                 parts.forEachIndexed { i, part ->
-                    val msg = td.uploadDocument(chatId, part.absolutePath, "$captionBase [part ${i + 1}/${parts.size}]")
+                    val msg = td.uploadDocument(chatId, part.absolutePath, "$captionBase [part ${i + 1}/${parts.size}]", threadId)
                     messageIds.add(msg.id)
                 }
             } finally {
@@ -243,7 +248,10 @@ class BackupEngine(private val context: Context) {
         val tmp = File(chunkDir, "8cloudgallery-index.enc")
         try {
             tmp.writeBytes(encryptedBytes)
-            td.uploadDocument(td.savedMessagesChatId(), tmp.absolutePath, "8cloudgallery-index")
+            val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            val destChat = prefs.getLong("destChatId", 0L).takeIf { it != 0L } ?: td.savedMessagesChatId()
+            val general = prefs.getLong("topicGeneral", 0L).takeIf { it != 0L && prefs.getLong("destChatId", 0L) != 0L }
+            td.uploadDocument(destChat, tmp.absolutePath, "8cloudgallery-index", general)
         } finally {
             tmp.delete()
         }

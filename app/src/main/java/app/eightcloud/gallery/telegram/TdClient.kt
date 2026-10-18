@@ -177,13 +177,13 @@ class TdClient private constructor(private val appContext: Context) {
     }
 
     /** Sends an encrypted file as a document; completes when Telegram confirms the upload. */
-    suspend fun uploadDocument(chatId: Long, filePath: String, caption: String): TdApi.Message =
+    suspend fun uploadDocument(chatId: Long, filePath: String, caption: String, threadId: Long? = null): TdApi.Message =
         withContext(Dispatchers.Default) {
             val content = TdApi.InputMessageDocument(
                 TdApi.InputDocument(TdApi.InputFileLocal(filePath), null, false),
                 TdApi.FormattedText(caption, null)
             )
-            val sent = send(TdApi.SendMessage(chatId, null, null, null, null, content))
+            val sent = send(TdApi.SendMessage(chatId, threadId, null, null, null, content))
             val deferred = CompletableDeferred<TdApi.Message>()
             pendingUploads[sent.id] = deferred
             try {
@@ -192,6 +192,24 @@ class TdClient private constructor(private val appContext: Context) {
                 pendingUploads.remove(sent.id)
             }
         }
+
+    /** Groups the account belongs to: (chatId, title). */
+    suspend fun myGroups(): List<Pair<Long, String>> {
+        val chats = send(TdApi.GetChats(TdApi.ChatListMain(), 200))
+        return chats.chatIds.mapNotNull { id ->
+            val chat = runCatching { send(TdApi.GetChat(id)) }.getOrNull() ?: return@mapNotNull null
+            when (chat.type) {
+                is TdApi.ChatTypeSupergroup, is TdApi.ChatTypeBasicGroup -> id to chat.title
+                else -> null
+            }
+        }
+    }
+
+    /** Forum topics of a supergroup: (topicId, name). Empty for non-forum chats. */
+    suspend fun forumTopics(chatId: Long): List<Pair<Long, String>> {
+        val res = send(TdApi.GetForumTopics(chatId, "", 0, 0, 0, 100))
+        return res.topics.map { it.info.forumTopicId.toLong() to it.info.name }
+    }
 
     /** Latest documents in a chat (for index restore / verify). */
     suspend fun chatHistory(chatId: Long, fromMessageId: Long = 0, limit: Int = 50): TdApi.Messages =
