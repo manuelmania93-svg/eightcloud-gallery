@@ -7,6 +7,8 @@ import app.eightcloud.gallery.BuildConfig
 import app.eightcloud.gallery.crypto.BackupCrypto
 import app.eightcloud.gallery.crypto.KeystoreKeys
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.resumeWithException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.Client
@@ -99,7 +101,7 @@ class TdClient private constructor(private val appContext: Context) {
 
     @Suppress("UNCHECKED_CAST")
     suspend fun <T : TdApi.Object> send(function: TdApi.Function<T>): T =
-        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        suspendCancellableCoroutine { cont ->
             val c = client ?: throw IllegalStateException("TdClient not started")
             c.send(function) { obj ->
                 if (obj is TdApi.Error) {
