@@ -1,6 +1,7 @@
 package app.eightcloud.gallery.data
 
 import android.content.Context
+import android.net.Uri
 import android.text.format.Formatter
 import androidx.exifinterface.media.ExifInterface
 import java.text.SimpleDateFormat
@@ -36,7 +37,7 @@ object DetailsLoader {
         var exposure: String? = null
         if (!item.isVideo) {
             try {
-                context.contentResolver.openInputStream(item.uri)?.use { stream ->
+                context.contentResolver.openInputStream(Uri.parse(item.uri))?.use { stream ->
                     val exif = ExifInterface(stream)
                     make = exif.getAttribute(ExifInterface.TAG_MAKE)?.trim()
                     model = exif.getAttribute(ExifInterface.TAG_MODEL)?.trim()

@@ -48,6 +48,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.net.Uri
 import android.widget.MediaController
 import android.widget.VideoView
 import app.eightcloud.gallery.data.MediaDetails
@@ -188,7 +189,7 @@ private fun VideoPage(item: MediaItem) {
     AndroidView(
         factory = { context ->
             VideoView(context).apply {
-                setVideoURI(item.uri)
+                setVideoURI(Uri.parse(item.uri))
                 val controller = MediaController(context)
                 controller.setAnchorView(this)
                 setMediaController(controller)

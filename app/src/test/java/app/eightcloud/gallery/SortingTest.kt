@@ -1,6 +1,5 @@
 package app.eightcloud.gallery
 
-import android.net.Uri
 import app.eightcloud.gallery.data.MediaItem
 import app.eightcloud.gallery.data.MediaSort
 import app.eightcloud.gallery.data.SortField
@@ -11,7 +10,7 @@ class SortingTest {
 
     private fun item(id: Long, name: String, date: Long, size: Long) = MediaItem(
         id = id,
-        uri = Uri.parse("content://media/external/images/media/$id"),
+        uri = "content://media/external/images/media/$id",
         isVideo = false,
         name = name,
         dateMillis = date,

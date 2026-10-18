@@ -54,7 +54,7 @@ object MediaStoreSource {
                 items.add(
                     MediaItem(
                         id = id,
-                        uri = ContentUris.withAppendedId(base, id),
+                        uri = ContentUris.withAppendedId(base, id).toString(),
                         isVideo = isVideo,
                         name = cursor.getString(cName) ?: "unknown",
                         dateMillis = if (taken > 0) taken else modified * 1000L,

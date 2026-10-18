@@ -1,10 +1,8 @@
 package app.eightcloud.gallery.data
 
-import android.net.Uri
-
 data class MediaItem(
     val id: Long,
-    val uri: Uri,
+    val uri: String,
     val isVideo: Boolean,
     val name: String,
     val dateMillis: Long,
