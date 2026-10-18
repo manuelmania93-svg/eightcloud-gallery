@@ -45,7 +45,7 @@ jobs:
       - name: Run smoke test on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
+          api-level: 29
           target: default
           arch: x86_64
           profile: Nexus 6

@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import android.os.Build
 import androidx.test.rule.GrantPermissionRule
 import org.junit.Rule
 import org.junit.Test
@@ -17,14 +18,15 @@ class MainActivitySmokeTest {
 
     private val composeRule = createAndroidComposeRule<MainActivity>()
 
+    private val mediaPermissions: Array<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) arrayOf(
+            android.Manifest.permission.READ_MEDIA_IMAGES,
+            android.Manifest.permission.READ_MEDIA_VIDEO
+        ) else arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+
     @get:Rule
     val chain: TestRule = RuleChain
-        .outerRule(
-            GrantPermissionRule.grant(
-                android.Manifest.permission.READ_MEDIA_IMAGES,
-                android.Manifest.permission.READ_MEDIA_VIDEO
-            )
-        )
+        .outerRule(GrantPermissionRule.grant(*mediaPermissions))
         .around(composeRule)
 
     @Test
