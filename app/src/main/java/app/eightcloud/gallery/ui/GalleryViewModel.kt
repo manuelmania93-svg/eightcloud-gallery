@@ -55,6 +55,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _sectionCounts = MutableStateFlow<Map<StatusFilter, Int>>(emptyMap())
     val sectionCounts: StateFlow<Map<StatusFilter, Int>> = _sectionCounts
 
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery
+
+    private val _videosOnly = MutableStateFlow(false)
+    val videosOnly: StateFlow<Boolean> = _videosOnly
+
     private val _statusFilter = MutableStateFlow(StatusFilter.ALL)
     val statusFilter: StateFlow<StatusFilter> = _statusFilter
 
@@ -178,6 +184,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         clearSelection()
     }
 
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+        applyView()
+    }
+
+    fun toggleVideosOnly() {
+        _videosOnly.value = !_videosOnly.value
+        applyView()
+    }
+
     fun setStatusFilter(filter: StatusFilter) {
         _statusFilter.value = filter
         applyView()
@@ -186,6 +202,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private fun applyView() {
         var view = allItems
         if (_favoritesOnly.value) view = view.filter { _favorites.value.contains(it.id) }
+        if (_videosOnly.value) view = view.filter { it.isVideo }
+        val query = _searchQuery.value.trim()
+        if (query.isNotEmpty()) {
+            view = view.filter { item ->
+                item.name.contains(query, ignoreCase = true) ||
+                    runCatching {
+                        val day = java.time.Instant.ofEpochMilli(item.dateMillis)
+                            .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                        day.toString().startsWith(query) ||
+                            day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+                                .contains(query, ignoreCase = true)
+                    }.getOrDefault(false)
+            }
+        }
         if (_statusFilter.value != StatusFilter.ALL) {
             val map = _statusById.value
             view = view.filter { item ->

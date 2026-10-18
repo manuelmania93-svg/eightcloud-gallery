@@ -48,6 +48,9 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _wifiOnly = MutableStateFlow(prefs.getBoolean("wifiOnly", true))
 
+    private val _chargingOnly = MutableStateFlow(prefs.getBoolean("chargingOnly", false))
+    val chargingOnly: StateFlow<Boolean> = _chargingOnly
+
     private val _backupScope = MutableStateFlow(prefs.getString("backupScope", "ALL") ?: "ALL")
     val backupScope: StateFlow<String> = _backupScope
 
@@ -110,13 +113,19 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         _backupEnabled.value = enabled
         prefs.edit().putBoolean("backupEnabled", enabled).apply()
         val app = getApplication<Application>()
-        if (enabled) BackupWorker.schedule(app, _wifiOnly.value) else BackupWorker.cancel(app)
+        if (enabled) BackupWorker.schedule(app, _wifiOnly.value, _chargingOnly.value) else BackupWorker.cancel(app)
     }
 
     fun setWifiOnly(enabled: Boolean) {
         _wifiOnly.value = enabled
         prefs.edit().putBoolean("wifiOnly", enabled).apply()
-        if (_backupEnabled.value) BackupWorker.schedule(getApplication(), enabled)
+        if (_backupEnabled.value) BackupWorker.schedule(getApplication(), enabled, _chargingOnly.value)
+    }
+
+    fun setChargingOnly(enabled: Boolean) {
+        _chargingOnly.value = enabled
+        prefs.edit().putBoolean("chargingOnly", enabled).apply()
+        if (_backupEnabled.value) BackupWorker.schedule(getApplication(), _wifiOnly.value, enabled)
     }
 
     fun setBackupScope(scope: String) {

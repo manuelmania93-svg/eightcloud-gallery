@@ -85,9 +85,10 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         const val KEY_TOTAL = "total"
         const val KEY_NAME = "name"
 
-        fun schedule(context: Context, wifiOnly: Boolean) {
+        fun schedule(context: Context, wifiOnly: Boolean, chargingOnly: Boolean = false) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                .setRequiresCharging(chargingOnly)
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 PERIODIC_NAME,

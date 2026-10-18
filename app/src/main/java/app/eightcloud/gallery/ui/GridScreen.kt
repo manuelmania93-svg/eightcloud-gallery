@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
@@ -134,6 +135,9 @@ fun GridScreen(viewModel: GalleryViewModel) {
     val statusFilter by viewModel.statusFilter.collectAsState()
     val selection by viewModel.selection.collectAsState()
     val sectionCounts by viewModel.sectionCounts.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val videosOnly by viewModel.videosOnly.collectAsState()
+    var searchActive by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     val deleteLauncher = rememberLauncherForActivityResult(
@@ -186,8 +190,29 @@ fun GridScreen(viewModel: GalleryViewModel) {
                 )
             } else {
             TopAppBar(
-                title = { Text("8CloudGallery") },
+                title = {
+                    if (searchActive) {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.setSearchQuery(it) },
+                            placeholder = { Text("Search name or date (2026-10)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        Text("8CloudGallery")
+                    }
+                },
                 actions = {
+                    IconButton(onClick = {
+                        if (searchActive) viewModel.setSearchQuery("")
+                        searchActive = !searchActive
+                    }) {
+                        Icon(
+                            imageVector = if (searchActive) Icons.Filled.Close else Icons.Filled.Search,
+                            contentDescription = "Search"
+                        )
+                    }
                     IconButton(onClick = { viewModel.toggleFavoritesOnly() }) {
                         Icon(
                             imageVector = if (favoritesOnly) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -236,7 +261,11 @@ fun GridScreen(viewModel: GalleryViewModel) {
             StatusFilterRow(
                 selected = statusFilter,
                 counts = sectionCounts,
-                onSelect = { viewModel.setStatusFilter(it) }
+                favoritesOnly = favoritesOnly,
+                videosOnly = videosOnly,
+                onSelect = { viewModel.setStatusFilter(it) },
+                onToggleFavorites = { viewModel.toggleFavoritesOnly() },
+                onToggleVideos = { viewModel.toggleVideosOnly() }
             )
             Box(modifier = Modifier.weight(1f)) {
             when {
@@ -557,7 +586,11 @@ private fun SortOption(
 private fun StatusFilterRow(
     selected: StatusFilter,
     counts: Map<StatusFilter, Int>,
-    onSelect: (StatusFilter) -> Unit
+    favoritesOnly: Boolean,
+    videosOnly: Boolean,
+    onSelect: (StatusFilter) -> Unit,
+    onToggleFavorites: () -> Unit,
+    onToggleVideos: () -> Unit
 ) {
     val options = listOf(
         StatusFilter.ALL to "All",
@@ -591,5 +624,27 @@ private fun StatusFilterRow(
                 )
             }
         }
+        FilterChip(label = "Favorites", selected = favoritesOnly, onClick = onToggleFavorites)
+        FilterChip(label = "Videos", selected = videosOnly, onClick = onToggleVideos)
+    }
+}
+
+@Composable
+private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

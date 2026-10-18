@@ -60,6 +60,7 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     val accountName by viewModel.accountName.collectAsState()
     val backedUp by viewModel.backedUp.collectAsState()
     val backupScope by viewModel.backupScope.collectAsState()
+    val chargingOnly by viewModel.chargingOnly.collectAsState()
     val progress by viewModel.progress.collectAsState()
     val failed by viewModel.failed.collectAsState()
     val deletableBytes by viewModel.deletableBytes.collectAsState()
@@ -293,6 +294,13 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                     ) {
                         Text("Wi-Fi only", modifier = Modifier.weight(1f))
                         Switch(checked = wifiOnly, onCheckedChange = { viewModel.setWifiOnly(it) })
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Only while charging", modifier = Modifier.weight(1f))
+                        Switch(checked = chargingOnly, onCheckedChange = { viewModel.setChargingOnly(it) })
                     }
                     Text(
                         "Backup scope",
