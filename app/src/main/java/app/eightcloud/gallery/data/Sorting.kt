@@ -23,6 +23,9 @@ object MediaSort {
     }
 
     private val formatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, d MMM yyyy")
+    private val monthFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy")
+
+    fun monthLabel(day: LocalDate): String = day.format(monthFormatter)
 
     fun dateLabel(day: LocalDate, today: LocalDate): String = when (day) {
         today -> "Today"
