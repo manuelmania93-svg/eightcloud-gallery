@@ -56,6 +56,6 @@ jobs:
           arch: x86_64
           profile: Nexus 6
           script: ./gradlew connectedDebugAndroidTest --stacktrace
-          env:
-            TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-            TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
