@@ -183,7 +183,8 @@ class TdClient private constructor(private val appContext: Context) {
                 TdApi.InputDocument(TdApi.InputFileLocal(filePath), null, false),
                 TdApi.FormattedText(caption, null)
             )
-            val sent = send(TdApi.SendMessage(chatId, threadId, null, null, null, content))
+            val topic = threadId?.let { TdApi.MessageTopicForum(it.toInt()) }
+            val sent = send(TdApi.SendMessage(chatId, topic, null, null, null, content))
             val deferred = CompletableDeferred<TdApi.Message>()
             pendingUploads[sent.id] = deferred
             try {
@@ -207,7 +208,7 @@ class TdClient private constructor(private val appContext: Context) {
 
     /** Forum topics of a supergroup: (topicId, name). Empty for non-forum chats. */
     suspend fun forumTopics(chatId: Long): List<Pair<Long, String>> {
-        val res = send(TdApi.GetForumTopics(chatId, "", 0, 0, 0, 100))
+        val res = send(TdApi.GetForumTopics(chatId, "", 0, 0L, 0, 100))
         return res.topics.map { it.info.forumTopicId.toLong() to it.info.name }
     }
 
