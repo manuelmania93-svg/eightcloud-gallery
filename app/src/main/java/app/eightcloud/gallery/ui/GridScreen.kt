@@ -80,26 +80,27 @@ private sealed class GridEntry(val key: String) {
     class Media(val item: MediaItem) : GridEntry("media-${item.id}")
 }
 
-private val monthYearFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy")
-
 private fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEntry> {
-    if (field != SortField.DATE) return items.map { GridEntry.Media(it) }
+    val entries = ArrayList<GridEntry>(items.size + 12)
+    var lastLabel: String? = null
     val zone = ZoneId.systemDefault()
-    val entries = mutableListOf<GridEntry>()
-    var lastMonth: YearMonth? = null
     for (item in items) {
-        val day = Instant.ofEpochMilli(item.dateMillis).atZone(zone).toLocalDate()
-        val month = YearMonth.from(day)
-        if (month != lastMonth) {
-            entries.add(GridEntry.Header(month.format(monthYearFormatter)))
-            lastMonth = month
+        val label: String? = when (field) {
+            SortField.DATE -> MediaSort.monthLabel(
+                Instant.ofEpochMilli(item.dateMillis).atZone(zone).toLocalDate()
+            )
+            SortField.NAME -> MediaSort.letterLabel(item.name)
+            SortField.SIZE -> null
+        }
+        if (label != null && label != lastLabel) {
+            entries.add(GridEntry.Header("h-$label", label))
+            lastLabel = label
         }
         entries.add(GridEntry.Media(item))
     }
     return entries
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GridScreen(viewModel: GalleryViewModel) {
     val items by viewModel.items.collectAsState()
@@ -231,14 +232,14 @@ fun GridScreen(viewModel: GalleryViewModel) {
                 }
             }
             if (entries.size > 30) {
-                FastScrollBar(gridState, entries)
+                FastScrollBar(gridState, entries, sortField)
             }
         }
     }
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState: LazyGridState, entries: List<GridEntry>) {
+private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState: LazyGridState, entries: List<GridEntry>, field: SortField) {
     val scope = rememberCoroutineScope()
     BoxWithConstraints(
         modifier = Modifier
@@ -286,7 +287,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
         )
 
         if (dragging) {
-            val label = bubbleLabelOf(entries.getOrNull(gridState.firstVisibleItemIndex))
+            val label = bubbleLabelOf(entries.getOrNull(gridState.firstVisibleItemIndex), field)
             androidx.compose.material3.Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(12.dp),
@@ -308,10 +309,14 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
 
 private val fullDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")
 
-private fun bubbleLabelOf(entry: GridEntry?): String = when (entry) {
+private fun bubbleLabelOf(entry: GridEntry?, field: SortField): String = when (entry) {
     is GridEntry.Header -> entry.title
-    is GridEntry.Media -> Instant.ofEpochMilli(entry.item.dateMillis)
-        .atZone(ZoneId.systemDefault()).toLocalDate().format(fullDateFormatter)
+    is GridEntry.Media -> when (field) {
+        SortField.DATE -> Instant.ofEpochMilli(entry.item.dateMillis)
+            .atZone(ZoneId.systemDefault()).toLocalDate().format(fullDateFormatter)
+        SortField.SIZE -> MediaSort.sizeLabel(entry.item.sizeBytes)
+        SortField.NAME -> MediaSort.letterLabel(entry.item.name)
+    }
     null -> ""
 }
 @Composable
@@ -324,7 +329,10 @@ private fun MediaThumb(item: MediaItem, status: String?, isFavorite: Boolean, on
             .clickable(onClick = onClick)
     ) {
         AsyncImage(
-            model = item.uri,
+            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                .data(item.uri)
+                .size(512, 512)
+                .build(),
             contentDescription = item.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()

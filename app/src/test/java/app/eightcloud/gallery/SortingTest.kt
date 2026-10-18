@@ -61,4 +61,19 @@ class SortingTest {
         val sorted = listOf(a, b, c).sortedWith(MediaSort.comparator(SortField.NAME, false))
         assertEquals(listOf(c, a, b), sorted)
     }
+    @Test
+    fun sizeLabelFormatsBytes() {
+        org.junit.Assert.assertEquals("512 B", MediaSort.sizeLabel(512))
+        org.junit.Assert.assertEquals("1.5 KB", MediaSort.sizeLabel(1536))
+        org.junit.Assert.assertEquals("2.4 MB", MediaSort.sizeLabel(2_516_584))
+        org.junit.Assert.assertEquals("1.0 GB", MediaSort.sizeLabel(1_073_741_824))
+    }
+
+    @Test
+    fun letterLabelUsesFirstLetterOrHash() {
+        org.junit.Assert.assertEquals("A", MediaSort.letterLabel("apple.jpg"))
+        org.junit.Assert.assertEquals("B", MediaSort.letterLabel("Banana.png"))
+        org.junit.Assert.assertEquals("#", MediaSort.letterLabel("3cats.jpg"))
+        org.junit.Assert.assertEquals("#", MediaSort.letterLabel(""))
+    }
 }
