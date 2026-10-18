@@ -11,6 +11,7 @@ import app.eightcloud.gallery.data.MediaSort
 import app.eightcloud.gallery.data.MediaStoreSource
 import app.eightcloud.gallery.backup.BackupDb
 import app.eightcloud.gallery.backup.BackupEntry
+import app.eightcloud.gallery.backup.BackupWorker
 import app.eightcloud.gallery.data.SortField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +48,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private val _sortAscending = MutableStateFlow(prefs.getBoolean("sortAscending", false))
     val sortAscending: StateFlow<Boolean> = _sortAscending
+
+    private val _selection = MutableStateFlow<Set<Long>>(emptySet())
+    val selection: StateFlow<Set<Long>> = _selection
+
+    private val _sectionCounts = MutableStateFlow<Map<StatusFilter, Int>>(emptyMap())
+    val sectionCounts: StateFlow<Map<StatusFilter, Int>> = _sectionCounts
 
     private val _statusFilter = MutableStateFlow(StatusFilter.ALL)
     val statusFilter: StateFlow<StatusFilter> = _statusFilter
@@ -150,6 +157,27 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         DetailsLoader.load(getApplication(), item)
     }
 
+    fun toggleSelect(id: Long) {
+        val next = _selection.value.toMutableSet()
+        if (!next.remove(id)) next.add(id)
+        _selection.value = next
+    }
+
+    fun clearSelection() {
+        _selection.value = emptySet()
+    }
+
+    /** Starts a manual backup run for the selected items only. */
+    fun backUpSelection() {
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        val app = getApplication<Application>()
+        val wifiOnly = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getBoolean("wifiOnly", true)
+        BackupWorker.runNow(app, wifiOnly, ids)
+        clearSelection()
+    }
+
     fun setStatusFilter(filter: StatusFilter) {
         _statusFilter.value = filter
         applyView()
@@ -171,6 +199,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         _items.value = view.sortedWith(MediaSort.comparator(_sortField.value, _sortAscending.value))
+
+        val map = _statusById.value
+        _sectionCounts.value = mapOf(
+            StatusFilter.ALL to allItems.size,
+            StatusFilter.BACKED_UP to allItems.count { map[it.id] == BackupEntry.BACKED_UP },
+            StatusFilter.PENDING to allItems.count {
+                map[it.id] != BackupEntry.BACKED_UP && map[it.id] != BackupEntry.CLOUD_ONLY
+            },
+            StatusFilter.CLOUD_ONLY to allItems.count { map[it.id] == BackupEntry.CLOUD_ONLY }
+        )
     }
 
     private fun loadFavorites(): Set<Long> =

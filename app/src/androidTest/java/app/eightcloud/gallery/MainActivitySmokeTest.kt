@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.longClick
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -104,21 +105,45 @@ class MainActivitySmokeTest {
                     .fetchSemanticsNodes().isNotEmpty()
             }
             // Fresh image is not backed up: visible under Pending, hidden under Backed up.
-            composeRule.onNodeWithText("Pending").performClick()
+            composeRule.onNodeWithText("Pending", substring = true).performClick()
             composeRule.waitUntil(timeoutMillis = 5000) {
                 composeRule.onAllNodesWithContentDescription("FilterA.png")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithText("Backed up").performClick()
+            composeRule.onNodeWithText("Backed up", substring = true).performClick()
             composeRule.waitUntil(timeoutMillis = 5000) {
                 composeRule.onAllNodesWithText("Nothing in this section")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithText("All").performClick()
+            composeRule.onNodeWithText("All", substring = true).performClick()
             composeRule.waitUntil(timeoutMillis = 5000) {
                 composeRule.onAllNodesWithContentDescription("FilterA.png")
                     .fetchSemanticsNodes().isNotEmpty()
             }
+        } finally {
+            resolver.delete(uri, null, null)
+        }
+    }
+
+    @Test
+    fun longPressSelectsPhoto() {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val uri = insertTestImage("SelectA.png", System.currentTimeMillis())
+        try {
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
+            }
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithContentDescription("SelectA.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("SelectA.png")
+                .performTouchInput { longClick() }
+            composeRule.waitUntil(timeoutMillis = 5000) {
+                composeRule.onAllNodesWithText("1 selected")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("1 selected").assertIsDisplayed()
         } finally {
             resolver.delete(uri, null, null)
         }

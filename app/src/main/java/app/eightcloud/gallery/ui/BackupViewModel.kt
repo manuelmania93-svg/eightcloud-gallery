@@ -8,6 +8,8 @@ import app.eightcloud.gallery.BuildConfig
 import app.eightcloud.gallery.backup.BackupDb
 import app.eightcloud.gallery.backup.BackupEngine
 import app.eightcloud.gallery.backup.BackupWorker
+import app.eightcloud.gallery.backup.BackupEntry
+import app.eightcloud.gallery.backup.BackupProgress
 import app.eightcloud.gallery.data.MediaStoreSource
 import app.eightcloud.gallery.telegram.TdClient
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +56,14 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _availableBuckets = MutableStateFlow<List<String>>(emptyList())
     val availableBuckets: StateFlow<List<String>> = _availableBuckets
+
+    val progress: StateFlow<BackupProgress.State> = BackupProgress.state
+
+    private val _failed = MutableStateFlow<List<BackupEntry>>(emptyList())
+    val failed: StateFlow<List<BackupEntry>> = _failed
+
+    private val _deletableBytes = MutableStateFlow(0L to 0)
+    val deletableBytes: StateFlow<Pair<Long, Int>> = _deletableBytes
     val wifiOnly: StateFlow<Boolean> = _wifiOnly
 
     val credentialsMissing: Boolean
@@ -143,7 +153,21 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
             val (backed, pending) = withContext(Dispatchers.IO) { engine.counts() }
             _backedUp.value = backed
             _pending.value = pending
+            _failed.value = engine.failed()
+            val deletable = engine.backedUpLocal()
+            _deletableBytes.value = deletable.sumOf { it.second } to deletable.size
         }
+    }
+
+    fun retryFailed() = guard {
+        val n = engine.retryFailed()
+        if (n > 0) backUpNow()
+        refreshCounts()
+    }
+
+    /** Content uris of all verified-backed-up local copies (for system delete). */
+    suspend fun backedUpLocalUris(): List<android.net.Uri> = withContext(Dispatchers.IO) {
+        engine.backedUpLocal().map { it.first }
     }
 
     private fun refreshAccount() {

@@ -23,6 +23,18 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.clickable
+import android.os.Build
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.TextButton
+import app.eightcloud.gallery.data.MediaSort
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -48,6 +60,58 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     val accountName by viewModel.accountName.collectAsState()
     val backedUp by viewModel.backedUp.collectAsState()
     val backupScope by viewModel.backupScope.collectAsState()
+    val progress by viewModel.progress.collectAsState()
+    val failed by viewModel.failed.collectAsState()
+    val deletableBytes by viewModel.deletableBytes.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showFreeUpDialog by remember { mutableStateOf(false) }
+    val freeUpLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) {
+        viewModel.refreshCounts()
+    }
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    fun backUpWithPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        viewModel.backUpNow()
+    }
+    if (showFreeUpDialog) {
+        val (freeBytes, freeCount) = deletableBytes
+        AlertDialog(
+            onDismissRequest = { showFreeUpDialog = false },
+            title = { Text("Free up space") },
+            text = {
+                Text("Delete $freeCount local copies (${MediaSort.sizeLabel(freeBytes)})? Every one of them is verified in your cloud backup and can be restored later.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFreeUpDialog = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        scope.launch {
+                            val uris = viewModel.backedUpLocalUris()
+                            if (uris.isNotEmpty()) {
+                                val request = MediaStore.createDeleteRequest(context.contentResolver, uris)
+                                freeUpLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                            }
+                        }
+                    } else {
+                        Toast.makeText(context, "Needs Android 11 or newer", Toast.LENGTH_LONG).show()
+                    }
+                }) { Text("Delete local copies") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFreeUpDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
     val backupBuckets by viewModel.backupBuckets.collectAsState()
     val availableBuckets by viewModel.availableBuckets.collectAsState()
     val pending by viewModel.pending.collectAsState()
@@ -150,8 +214,77 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
+                    if (progress.running || progress.total > 0) {
+                        val pct = if (progress.total > 0)
+                            (progress.done * 100) / progress.total else 0
+                        Text(
+                            "${progress.done} of ${progress.total} · $pct%",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                        LinearProgressIndicator(
+                            progress = {
+                                if (progress.total > 0)
+                                    progress.done.toFloat() / progress.total else 0f
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                        )
+                        val remaining = progress.bytesTotal - progress.bytesDone
+                        Text(
+                            listOfNotNull(
+                                progress.currentName.takeIf { it.isNotBlank() },
+                                if (progress.bytesTotal > 0)
+                                    "remaining: ${MediaSort.sizeLabel(remaining)}" else null
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    if (failed.isNotEmpty()) {
+                        Text(
+                            "Failed (${failed.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 16.dp)
+                        )
+                        for (entry in failed.take(20)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                    Text(
+                                        entry.errorMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.retryFailed() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                        ) { Text("Retry failed") }
+                    }
+                    val (freeBytes, freeCount) = deletableBytes
+                    if (freeCount > 0) {
+                        OutlinedButton(
+                            onClick = { showFreeUpDialog = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                        ) { Text("Free up space (${MediaSort.sizeLabel(freeBytes)})") }
+                    }
                     Button(
-                        onClick = { viewModel.backUpNow() },
+                        onClick = { backUpWithPermission() },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 8.dp)

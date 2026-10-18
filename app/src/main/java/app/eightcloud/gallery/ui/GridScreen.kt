@@ -1,7 +1,17 @@
 package app.eightcloud.gallery.ui
 
 import androidx.compose.foundation.background
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +47,12 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,8 +60,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -104,7 +121,7 @@ private fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEnt
     return entries
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun GridScreen(viewModel: GalleryViewModel) {
     val items by viewModel.items.collectAsState()
@@ -114,6 +131,16 @@ fun GridScreen(viewModel: GalleryViewModel) {
     val sortAscending by viewModel.sortAscending.collectAsState()
     val favoritesOnly by viewModel.favoritesOnly.collectAsState()
     val statusFilter by viewModel.statusFilter.collectAsState()
+    val selection by viewModel.selection.collectAsState()
+    val sectionCounts by viewModel.sectionCounts.collectAsState()
+    val context = LocalContext.current
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) {
+        viewModel.clearSelection()
+        viewModel.loadMedia()
+    }
     val favorites by viewModel.favorites.collectAsState()
     val statusById by viewModel.statusById.collectAsState()
 
@@ -126,6 +153,37 @@ fun GridScreen(viewModel: GalleryViewModel) {
 
     Scaffold(
         topBar = {
+            if (selection.isNotEmpty()) {
+                TopAppBar(
+                    title = { Text("${selection.size} selected") },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.backUpSelection() }) {
+                            Icon(Icons.Filled.CloudUpload, contentDescription = "Back up selected")
+                        }
+                        IconButton(onClick = {
+                            val uris = items.filter { it.id in selection }.map { Uri.parse(it.uri) }
+                            if (uris.isNotEmpty()) {
+                                val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                                    type = "*/*"
+                                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(intent, null))
+                            }
+                        }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share selected")
+                        }
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete local copies")
+                        }
+                    }
+                )
+            } else {
             TopAppBar(
                 title = { Text("8CloudGallery") },
                 actions = {
@@ -166,6 +224,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
                     }
                 }
             )
+            }
         }
     ) { innerPadding ->
         Column(
@@ -175,6 +234,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
         ) {
             StatusFilterRow(
                 selected = statusFilter,
+                counts = sectionCounts,
                 onSelect = { viewModel.setStatusFilter(it) }
             )
             Box(modifier = Modifier.weight(1f)) {
@@ -232,10 +292,16 @@ fun GridScreen(viewModel: GalleryViewModel) {
                                 item = entry.item,
                                 status = statusById[entry.item.id],
                                 isFavorite = favorites.contains(entry.item.id),
+                                isSelected = selection.contains(entry.item.id),
                                 onClick = {
-                                    val index = items.indexOfFirst { it.id == entry.item.id }
-                                    if (index >= 0) viewModel.openViewer(index)
-                                }
+                                    if (selection.isNotEmpty()) {
+                                        viewModel.toggleSelect(entry.item.id)
+                                    } else {
+                                        val index = items.indexOfFirst { it.id == entry.item.id }
+                                        if (index >= 0) viewModel.openViewer(index)
+                                    }
+                                },
+                                onLongClick = { viewModel.toggleSelect(entry.item.id) }
                             )
                         }
                     }
@@ -246,6 +312,43 @@ fun GridScreen(viewModel: GalleryViewModel) {
             }
             }
         }
+    }
+
+    if (showDeleteDialog) {
+        val deletable = items.filter { it.id in selection && statusById[it.id] == BackupEntry.BACKED_UP }
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Free up space") },
+            text = {
+                Text(
+                    if (deletable.isEmpty())
+                        "None of the selected items are verified in your cloud backup yet, so nothing can be deleted."
+                    else
+                        "Delete ${deletable.size} local copies? All of them are verified in your cloud backup." +
+                            if (deletable.size < selection.size) " (${selection.size - deletable.size} selected items are not backed up and will be kept.)" else ""
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = deletable.isNotEmpty(),
+                    onClick = {
+                        showDeleteDialog = false
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val request = MediaStore.createDeleteRequest(
+                                context.contentResolver,
+                                deletable.map { Uri.parse(it.uri) }
+                            )
+                            deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                        } else {
+                            Toast.makeText(context, "Needs Android 11 or newer", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -331,13 +434,20 @@ private fun bubbleLabelOf(entry: GridEntry?, field: SortField): String = when (e
     null -> ""
 }
 @Composable
-private fun MediaThumb(item: MediaItem, status: String?, isFavorite: Boolean, onClick: () -> Unit) {
+private fun MediaThumb(
+    item: MediaItem,
+    status: String?,
+    isFavorite: Boolean,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         AsyncImage(
             model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
@@ -367,6 +477,22 @@ private fun MediaThumb(item: MediaItem, status: String?, isFavorite: Boolean, on
                 contentDescription = badgeDesc,
                 tint = badgeTint,
                 modifier = Modifier.size(12.dp)
+            )
+        }
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+            )
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = "Selected",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(5.dp)
+                    .size(22.dp)
             )
         }
         if (isFavorite) {
@@ -426,7 +552,11 @@ private fun SortOption(
 }
 
 @Composable
-private fun StatusFilterRow(selected: StatusFilter, onSelect: (StatusFilter) -> Unit) {
+private fun StatusFilterRow(
+    selected: StatusFilter,
+    counts: Map<StatusFilter, Int>,
+    onSelect: (StatusFilter) -> Unit
+) {
     val options = listOf(
         StatusFilter.ALL to "All",
         StatusFilter.BACKED_UP to "Backed up",
@@ -441,6 +571,7 @@ private fun StatusFilterRow(selected: StatusFilter, onSelect: (StatusFilter) -> 
     ) {
         for ((filter, label) in options) {
             val isSelected = filter == selected
+            val count = counts[filter] ?: 0
             Surface(
                 color = if (isSelected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant,
@@ -450,7 +581,7 @@ private fun StatusFilterRow(selected: StatusFilter, onSelect: (StatusFilter) -> 
                     .clickable { onSelect(filter) }
             ) {
                 Text(
-                    text = label,
+                    text = "$label ($count)",
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimary
