@@ -101,6 +101,22 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
+            Text("Cloud backup", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Back up photos and videos, encrypted, into your second Telegram account.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            androidx.compose.material3.Button(
+                onClick = { viewModel.openBackup() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+            ) { Text("Open backup") }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
             Text("Theme", style = MaterialTheme.typography.titleMedium)
             sortChoice("System", themeMode == ThemeMode.SYSTEM) { viewModel.setThemeMode(ThemeMode.SYSTEM) }
             sortChoice("Light", themeMode == ThemeMode.LIGHT) { viewModel.setThemeMode(ThemeMode.LIGHT) }

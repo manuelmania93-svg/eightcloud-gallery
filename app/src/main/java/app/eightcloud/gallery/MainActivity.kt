@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.eightcloud.gallery.ui.BackupScreen
+import app.eightcloud.gallery.ui.BackupViewModel
 import app.eightcloud.gallery.ui.EightCloudTheme
 import app.eightcloud.gallery.ui.GalleryViewModel
 import app.eightcloud.gallery.ui.GridScreen
@@ -86,6 +88,10 @@ fun EightCloudApp() {
                     Screen.GRID -> GridScreen(viewModel)
                     Screen.VIEWER -> ViewerScreen(viewModel)
                     Screen.SETTINGS -> SettingsScreen(viewModel)
+                    Screen.BACKUP -> {
+                        val backupViewModel: BackupViewModel = viewModel()
+                        BackupScreen(backupViewModel, onBack = { viewModel.backToGrid() })
+                    }
                 }
             } else {
                 PermissionRequest(onRequest = { launcher.launch(requiredPermissions()) })

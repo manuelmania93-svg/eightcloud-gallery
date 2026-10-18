@@ -18,10 +18,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import app.eightcloud.gallery.data.DetailsLoader
 import app.eightcloud.gallery.data.MediaItem
 import app.eightcloud.gallery.data.MediaSort
+import app.eightcloud.gallery.backup.BackupEntry
 import app.eightcloud.gallery.data.SortField
 import coil.compose.AsyncImage
 import java.time.Instant
@@ -89,6 +94,9 @@ fun GridScreen(viewModel: GalleryViewModel) {
     val sortAscending by viewModel.sortAscending.collectAsState()
     val favoritesOnly by viewModel.favoritesOnly.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
+    val statusById by viewModel.statusById.collectAsState()
+
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshBackupStatus() }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var zoomAccumulator by remember { mutableStateOf(1f) }
 
@@ -194,6 +202,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
                             )
                             is GridEntry.Media -> MediaThumb(
                                 item = entry.item,
+                                status = statusById[entry.item.id],
                                 isFavorite = favorites.contains(entry.item.id),
                                 onClick = {
                                     val index = items.indexOfFirst { it.id == entry.item.id }
@@ -225,7 +234,7 @@ private fun sortOption(
 }
 
 @Composable
-private fun MediaThumb(item: MediaItem, isFavorite: Boolean, onClick: () -> Unit) {
+private fun MediaThumb(item: MediaItem, status: String?, isFavorite: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
@@ -247,10 +256,16 @@ private fun MediaThumb(item: MediaItem, isFavorite: Boolean, onClick: () -> Unit
                 .background(Color.Black.copy(alpha = 0.35f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
+            val (badgeIcon, badgeTint, badgeDesc) = when (status) {
+                BackupEntry.BACKED_UP -> Triple(Icons.Filled.Check, Color(0xFF7BE3A8), "Backed up")
+                BackupEntry.CLOUD_ONLY -> Triple(Icons.Filled.KeyboardArrowDown, Color(0xFF9CC8EC), "Cloud only")
+                BackupEntry.MISSING_IN_CLOUD -> Triple(Icons.Filled.Warning, Color(0xFFE2A455), "Missing in cloud")
+                else -> Triple(Icons.Filled.Phone, Color.White, "Local only")
+            }
             Icon(
-                imageVector = Icons.Filled.Phone,
-                contentDescription = "Local only",
-                tint = Color.White,
+                imageVector = badgeIcon,
+                contentDescription = badgeDesc,
+                tint = badgeTint,
                 modifier = Modifier.size(12.dp)
             )
         }

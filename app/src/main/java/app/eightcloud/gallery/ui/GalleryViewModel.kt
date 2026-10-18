@@ -9,6 +9,7 @@ import app.eightcloud.gallery.data.DetailsLoader
 import app.eightcloud.gallery.data.MediaItem
 import app.eightcloud.gallery.data.MediaSort
 import app.eightcloud.gallery.data.MediaStoreSource
+import app.eightcloud.gallery.backup.BackupDb
 import app.eightcloud.gallery.data.SortField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP }
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -62,6 +63,19 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _viewerStartIndex = MutableStateFlow(0)
     val viewerStartIndex: StateFlow<Int> = _viewerStartIndex
 
+    private val _statusById = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val statusById: StateFlow<Map<Long, String>> = _statusById
+
+    fun refreshBackupStatus() {
+        viewModelScope.launch {
+            val map = withContext(Dispatchers.IO) {
+                BackupDb.get(getApplication()).dao().all()
+                    .associate { it.mediaStoreId to it.status }
+            }
+            _statusById.value = map
+        }
+    }
+
     fun setPermissionGranted(granted: Boolean) {
         _permissionGranted.value = granted
         if (granted) loadMedia()
@@ -75,6 +89,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             allItems = result
             applyView()
+            refreshBackupStatus()
             _loading.value = false
         }
     }
@@ -120,6 +135,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openSettings() { _screen.value = Screen.SETTINGS }
+
+    fun openBackup() { _screen.value = Screen.BACKUP }
 
     fun backToGrid() { _screen.value = Screen.GRID }
 
