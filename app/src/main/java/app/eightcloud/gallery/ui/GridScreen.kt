@@ -93,7 +93,7 @@ private fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEnt
             SortField.SIZE -> null
         }
         if (label != null && label != lastLabel) {
-            entries.add(GridEntry.Header("h-$label", label))
+            entries.add(GridEntry.Header(label))
             lastLabel = label
         }
         entries.add(GridEntry.Media(item))
