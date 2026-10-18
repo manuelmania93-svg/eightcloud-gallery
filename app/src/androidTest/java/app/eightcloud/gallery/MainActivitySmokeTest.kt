@@ -91,6 +91,39 @@ class MainActivitySmokeTest {
         }
     }
 
+    @Test
+    fun statusFilterChips() {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val uri = insertTestImage("FilterA.png", System.currentTimeMillis())
+        try {
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
+            }
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithContentDescription("FilterA.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            // Fresh image is not backed up: visible under Pending, hidden under Backed up.
+            composeRule.onNodeWithText("Pending").performClick()
+            composeRule.waitUntil(timeoutMillis = 5000) {
+                composeRule.onAllNodesWithContentDescription("FilterA.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("Backed up").performClick()
+            composeRule.waitUntil(timeoutMillis = 5000) {
+                composeRule.onAllNodesWithText("Nothing in this section")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("All").performClick()
+            composeRule.waitUntil(timeoutMillis = 5000) {
+                composeRule.onAllNodesWithContentDescription("FilterA.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+        } finally {
+            resolver.delete(uri, null, null)
+        }
+    }
+
     private fun insertTestImage(displayName: String, dateTakenMs: Long): Uri {
         val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
         val values = ContentValues().apply {

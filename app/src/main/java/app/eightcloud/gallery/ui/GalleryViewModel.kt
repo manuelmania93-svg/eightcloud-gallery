@@ -10,6 +10,7 @@ import app.eightcloud.gallery.data.MediaItem
 import app.eightcloud.gallery.data.MediaSort
 import app.eightcloud.gallery.data.MediaStoreSource
 import app.eightcloud.gallery.backup.BackupDb
+import app.eightcloud.gallery.backup.BackupEntry
 import app.eightcloud.gallery.data.SortField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.withContext
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class Screen { GRID, VIEWER, SETTINGS, BACKUP }
+enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -45,6 +47,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private val _sortAscending = MutableStateFlow(prefs.getBoolean("sortAscending", false))
     val sortAscending: StateFlow<Boolean> = _sortAscending
+
+    private val _statusFilter = MutableStateFlow(StatusFilter.ALL)
+    val statusFilter: StateFlow<StatusFilter> = _statusFilter
 
     private val _favoritesOnly = MutableStateFlow(false)
     val favoritesOnly: StateFlow<Boolean> = _favoritesOnly
@@ -73,6 +78,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     .associate { it.mediaStoreId to it.status }
             }
             _statusById.value = map
+            applyView()
         }
     }
 
@@ -144,9 +150,26 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         DetailsLoader.load(getApplication(), item)
     }
 
+    fun setStatusFilter(filter: StatusFilter) {
+        _statusFilter.value = filter
+        applyView()
+    }
+
     private fun applyView() {
         var view = allItems
         if (_favoritesOnly.value) view = view.filter { _favorites.value.contains(it.id) }
+        if (_statusFilter.value != StatusFilter.ALL) {
+            val map = _statusById.value
+            view = view.filter { item ->
+                when (_statusFilter.value) {
+                    StatusFilter.BACKED_UP -> map[item.id] == BackupEntry.BACKED_UP
+                    StatusFilter.CLOUD_ONLY -> map[item.id] == BackupEntry.CLOUD_ONLY
+                    StatusFilter.PENDING ->
+                        map[item.id] != BackupEntry.BACKED_UP && map[item.id] != BackupEntry.CLOUD_ONLY
+                    StatusFilter.ALL -> true
+                }
+            }
+        }
         _items.value = view.sortedWith(MediaSort.comparator(_sortField.value, _sortAscending.value))
     }
 

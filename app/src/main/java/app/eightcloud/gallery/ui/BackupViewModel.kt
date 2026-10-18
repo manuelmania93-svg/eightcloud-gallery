@@ -8,6 +8,7 @@ import app.eightcloud.gallery.BuildConfig
 import app.eightcloud.gallery.backup.BackupDb
 import app.eightcloud.gallery.backup.BackupEngine
 import app.eightcloud.gallery.backup.BackupWorker
+import app.eightcloud.gallery.data.MediaStoreSource
 import app.eightcloud.gallery.telegram.TdClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,15 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
     val backupEnabled: StateFlow<Boolean> = _backupEnabled
 
     private val _wifiOnly = MutableStateFlow(prefs.getBoolean("wifiOnly", true))
+
+    private val _backupScope = MutableStateFlow(prefs.getString("backupScope", "ALL") ?: "ALL")
+    val backupScope: StateFlow<String> = _backupScope
+
+    private val _backupBuckets = MutableStateFlow(prefs.getStringSet("backupBuckets", emptySet()) ?: emptySet())
+    val backupBuckets: StateFlow<Set<String>> = _backupBuckets
+
+    private val _availableBuckets = MutableStateFlow<List<String>>(emptyList())
+    val availableBuckets: StateFlow<List<String>> = _availableBuckets
     val wifiOnly: StateFlow<Boolean> = _wifiOnly
 
     val credentialsMissing: Boolean
@@ -57,6 +67,7 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
     init {
         td.addAuthWatcher(watcher)
         refreshCounts()
+        loadBuckets()
     }
 
     override fun onCleared() {
@@ -87,6 +98,28 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         _wifiOnly.value = enabled
         prefs.edit().putBoolean("wifiOnly", enabled).apply()
         if (_backupEnabled.value) BackupWorker.schedule(getApplication(), enabled)
+    }
+
+    fun setBackupScope(scope: String) {
+        _backupScope.value = scope
+        prefs.edit().putString("backupScope", scope).apply()
+    }
+
+    fun setBucketIncluded(bucket: String, included: Boolean) {
+        val next = if (included) _backupBuckets.value + bucket else _backupBuckets.value - bucket
+        _backupBuckets.value = next
+        prefs.edit().putStringSet("backupBuckets", next).apply()
+    }
+
+    private fun loadBuckets() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val buckets = MediaStoreSource.query(getApplication())
+                .map { it.bucket }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .sorted()
+            _availableBuckets.value = buckets
+        }
     }
 
     fun backUpNow() {

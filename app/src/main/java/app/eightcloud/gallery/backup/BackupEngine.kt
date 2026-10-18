@@ -37,7 +37,11 @@ class BackupEngine(private val context: Context) {
 
     /** Adds files that are new to the index as PENDING. Returns the new count. */
     suspend fun scan(): Int = withContext(Dispatchers.IO) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val selectedOnly = prefs.getString("backupScope", "ALL") == "SELECTED"
+        val buckets = prefs.getStringSet("backupBuckets", emptySet()) ?: emptySet()
         val items = MediaStoreSource.query(context)
+            .filter { !selectedOnly || it.bucket in buckets }
         var added = 0
         val now = System.currentTimeMillis()
         for (item in items) {

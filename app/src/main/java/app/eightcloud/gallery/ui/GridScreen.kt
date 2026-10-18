@@ -44,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -101,6 +102,7 @@ private fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEnt
     return entries
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GridScreen(viewModel: GalleryViewModel) {
     val items by viewModel.items.collectAsState()
@@ -109,6 +111,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val favoritesOnly by viewModel.favoritesOnly.collectAsState()
+    val statusFilter by viewModel.statusFilter.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
     val statusById by viewModel.statusById.collectAsState()
 
@@ -163,15 +166,20 @@ fun GridScreen(viewModel: GalleryViewModel) {
             )
         }
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            StatusFilterRow(
+                selected = statusFilter,
+                onSelect = { viewModel.setStatusFilter(it) }
+            )
+            Box(modifier = Modifier.weight(1f)) {
             when {
                 loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 items.isEmpty() -> Text(
-                    text = if (favoritesOnly) "No favorites yet" else "No photos or videos yet",
+                    text = if (favoritesOnly) "No favorites yet" else if (statusFilter != StatusFilter.ALL) "Nothing in this section" else "No photos or videos yet",
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(32.dp),
@@ -233,6 +241,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
             }
             if (entries.size > 30) {
                 FastScrollBar(gridState, entries, sortField)
+            }
             }
         }
     }
@@ -412,4 +421,40 @@ private fun SortOption(
         },
         onClick = onClick
     )
+}
+
+@Composable
+private fun StatusFilterRow(selected: StatusFilter, onSelect: (StatusFilter) -> Unit) {
+    val options = listOf(
+        StatusFilter.ALL to "All",
+        StatusFilter.BACKED_UP to "Backed up",
+        StatusFilter.PENDING to "Pending",
+        StatusFilter.CLOUD_ONLY to "Cloud only"
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        for ((filter, label) in options) {
+            val isSelected = filter == selected
+            Surface(
+                color = if (isSelected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onSelect(filter) }
+            ) {
+                Text(
+                    text = label,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }

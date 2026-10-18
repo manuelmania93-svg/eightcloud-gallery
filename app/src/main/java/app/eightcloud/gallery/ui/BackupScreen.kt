@@ -20,6 +20,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -44,6 +47,9 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     val error by viewModel.error.collectAsState()
     val accountName by viewModel.accountName.collectAsState()
     val backedUp by viewModel.backedUp.collectAsState()
+    val backupScope by viewModel.backupScope.collectAsState()
+    val backupBuckets by viewModel.backupBuckets.collectAsState()
+    val availableBuckets by viewModel.availableBuckets.collectAsState()
     val pending by viewModel.pending.collectAsState()
     val backupEnabled by viewModel.backupEnabled.collectAsState()
     val wifiOnly by viewModel.wifiOnly.collectAsState()
@@ -95,6 +101,54 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                     ) {
                         Text("Wi-Fi only", modifier = Modifier.weight(1f))
                         Switch(checked = wifiOnly, onCheckedChange = { viewModel.setWifiOnly(it) })
+                    }
+                    Text(
+                        "Backup scope",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setBackupScope("ALL") }
+                    ) {
+                        RadioButton(selected = backupScope == "ALL", onClick = { viewModel.setBackupScope("ALL") })
+                        Text("All photos & videos on this device")
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setBackupScope("SELECTED") }
+                    ) {
+                        RadioButton(selected = backupScope == "SELECTED", onClick = { viewModel.setBackupScope("SELECTED") })
+                        Text("Only chosen folders")
+                    }
+                    if (backupScope == "SELECTED") {
+                        if (availableBuckets.isEmpty()) {
+                            Text(
+                                "No folders found yet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                            )
+                        }
+                        for (bucket in availableBuckets) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.setBucketIncluded(bucket, bucket !in backupBuckets) }
+                                    .padding(start = 16.dp)
+                            ) {
+                                Checkbox(
+                                    checked = bucket in backupBuckets,
+                                    onCheckedChange = { viewModel.setBucketIncluded(bucket, it) }
+                                )
+                                Text(bucket)
+                            }
+                        }
                     }
                     Button(
                         onClick = { viewModel.backUpNow() },
