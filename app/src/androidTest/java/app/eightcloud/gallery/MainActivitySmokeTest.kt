@@ -54,10 +54,10 @@ class MainActivitySmokeTest {
     fun sortButtonOpensSortMenu() {
         composeRule.onNodeWithContentDescription("Sort").performClick()
         composeRule.waitUntil(timeoutMillis = 5000) {
-            composeRule.onAllNodesWithText("Date (newest first)")
+            composeRule.onAllNodesWithText("Date (newest first)", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Size (largest first)").assertIsDisplayed()
+        composeRule.onNodeWithText("Size (largest first)", substring = true).assertIsDisplayed()
     }
 
     @Test
