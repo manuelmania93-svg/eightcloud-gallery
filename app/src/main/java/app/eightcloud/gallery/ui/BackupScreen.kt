@@ -63,6 +63,10 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     val progress by viewModel.progress.collectAsState()
     val failed by viewModel.failed.collectAsState()
     val deletableBytes by viewModel.deletableBytes.collectAsState()
+    val destTitle by viewModel.destTitle.collectAsState()
+    val groups by viewModel.groups.collectAsState()
+    var showDestDialog by remember { mutableStateOf(false) }
+    var showManualDialog by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var showFreeUpDialog by remember { mutableStateOf(false) }
@@ -219,10 +223,6 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     }
     val backupBuckets by viewModel.backupBuckets.collectAsState()
     val availableBuckets by viewModel.availableBuckets.collectAsState()
-    val destTitle by viewModel.destTitle.collectAsState()
-    val groups by viewModel.groups.collectAsState()
-    var showDestDialog by remember { mutableStateOf(false) }
-    var showManualDialog by remember { mutableStateOf(false) }
     val pending by viewModel.pending.collectAsState()
     val backupEnabled by viewModel.backupEnabled.collectAsState()
     val wifiOnly by viewModel.wifiOnly.collectAsState()

@@ -197,19 +197,24 @@ class TdClient private constructor(private val appContext: Context) {
     /** Groups the account belongs to: (chatId, title). */
     suspend fun myGroups(): List<Pair<Long, String>> {
         val chats = send(TdApi.GetChats(TdApi.ChatListMain(), 200))
-        return chats.chatIds.mapNotNull { id ->
-            val chat = runCatching { send(TdApi.GetChat(id)) }.getOrNull() ?: return@mapNotNull null
-            when (chat.type) {
-                is TdApi.ChatTypeSupergroup, is TdApi.ChatTypeBasicGroup -> id to chat.title
-                else -> null
+        val result = ArrayList<Pair<Long, String>>()
+        for (id in chats.chatIds) {
+            val chat = runCatching { send(TdApi.GetChat(id)) }.getOrNull() ?: continue
+            if (chat.type is TdApi.ChatTypeSupergroup || chat.type is TdApi.ChatTypeBasicGroup) {
+                result.add(id to chat.title)
             }
         }
+        return result
     }
 
     /** Forum topics of a supergroup: (topicId, name). Empty for non-forum chats. */
     suspend fun forumTopics(chatId: Long): List<Pair<Long, String>> {
         val res = send(TdApi.GetForumTopics(chatId, "", 0, 0L, 0, 100))
-        return res.topics.map { it.info.forumTopicId.toLong() to it.info.name }
+        val result = ArrayList<Pair<Long, String>>()
+        for (topic in res.topics) {
+            result.add(topic.info.forumTopicId.toLong() to topic.info.name)
+        }
+        return result
     }
 
     /** Latest documents in a chat (for index restore / verify). */
