@@ -178,7 +178,7 @@ private fun PhotoPage(item: MediaItem) {
                                 offsetX = 0f
                                 offsetY = 0f
                             }
-                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            event.changes.forEach { if (it.position != it.previousPosition) it.consume() }
                         }
                     }
                     if (scale <= 1.01f) {
