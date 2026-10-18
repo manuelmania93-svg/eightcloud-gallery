@@ -259,13 +259,18 @@ class BackupEngine(private val context: Context) {
 
     /** Imports the newest index document found in Saved Messages. Returns imported count. */
     suspend fun importIndex(): Int = withContext(Dispatchers.IO) {
-        val chatId = td.savedMessagesChatId()
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val chatId = destinationChat()
+        val generalTopic = prefs.getLong("topicGeneral", 0L).takeIf {
+            it != 0L && prefs.getLong("destChatId", 0L) != 0L
+        }?.toInt()
         var fromId = 0L
         var indexDoc: TdApi.Document? = null
         // Walk back through history until the newest index document is found.
         var rounds = 0
         while (indexDoc == null && rounds < 20) {
-            val page = td.chatHistory(chatId, fromId, 100)
+            val page = if (generalTopic != null) td.forumTopicHistory(chatId, generalTopic, fromId, 100)
+            else td.chatHistory(chatId, fromId, 100)
             if (page.messages.isEmpty()) break
             for (message in page.messages) {
                 val content = message.content
@@ -312,22 +317,24 @@ class BackupEngine(private val context: Context) {
      * messages are gone as MISSING_IN_CLOUD. Bounded to the newest 200
      * messages on purpose.
      */
+    /** Resolves the active backup destination chat (group or Saved Messages). */
+    private suspend fun destinationChat(): Long {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        return prefs.getLong("destChatId", 0L).takeIf { it != 0L } ?: td.savedMessagesChatId()
+    }
+
     suspend fun verify(): Int = withContext(Dispatchers.IO) {
-        val chatId = td.savedMessagesChatId()
-        val seen = mutableSetOf<Long>()
-        var fromId = 0L
-        repeat(2) {
-            val page = td.chatHistory(chatId, fromId, 100)
-            if (page.messages.isEmpty()) return@repeat
-            page.messages.forEach { seen.add(it.id) }
-            fromId = page.messages.last().id
-        }
+        val chatId = destinationChat()
         var missing = 0
         db.dao().all()
             .filter { it.status == BackupEntry.BACKED_UP }
             .forEach { entry ->
                 val ids = entry.telegramMessageIds.split(",").mapNotNull { it.toLongOrNull() }
-                if (ids.isNotEmpty() && ids.none { seen.contains(it) }) {
+                if (ids.isEmpty()) return@forEach
+                val found = runCatching {
+                    td.getMessages(chatId, ids.toLongArray()).messages.count { it != null }
+                }.getOrDefault(0)
+                if (found == 0) {
                     db.dao().setStatus(entry.contentHash, BackupEntry.MISSING_IN_CLOUD)
                     missing++
                 }

@@ -216,6 +216,14 @@ class TdClient private constructor(private val appContext: Context) {
     suspend fun chatHistory(chatId: Long, fromMessageId: Long = 0, limit: Int = 50): TdApi.Messages =
         send(TdApi.GetChatHistory(chatId, fromMessageId, 0, limit, false))
 
+    /** Fetches specific messages by id (topic-independent existence check). */
+    suspend fun getMessages(chatId: Long, messageIds: LongArray): TdApi.Messages =
+        send(TdApi.GetMessages(chatId, messageIds))
+
+    /** History of one forum topic. */
+    suspend fun forumTopicHistory(chatId: Long, forumTopicId: Int, fromMessageId: Long = 0, limit: Int = 50): TdApi.Messages =
+        send(TdApi.GetForumTopicHistory(chatId, forumTopicId, fromMessageId, 0, limit))
+
     /** Downloads a remote file and returns the local path. */
     suspend fun downloadFile(fileId: Int): String {
         val file = send(TdApi.DownloadFile(fileId, 32, 0, 0, true))

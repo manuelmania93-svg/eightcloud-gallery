@@ -64,6 +64,12 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _deletableBytes = MutableStateFlow(0L to 0)
     val deletableBytes: StateFlow<Pair<Long, Int>> = _deletableBytes
+
+    private val _destTitle = MutableStateFlow(prefs.getString("destTitle", null) ?: "Saved Messages")
+    val destTitle: StateFlow<String> = _destTitle
+
+    private val _groups = MutableStateFlow<List<Pair<Long, String>>>(emptyList())
+    val groups: StateFlow<List<Pair<Long, String>>> = _groups
     val wifiOnly: StateFlow<Boolean> = _wifiOnly
 
     val credentialsMissing: Boolean
@@ -71,7 +77,10 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
 
     private val watcher: (TdApi.AuthorizationState) -> Unit = { state ->
         _authState.value = state
-        if (state is TdApi.AuthorizationStateReady) refreshAccount()
+        if (state is TdApi.AuthorizationStateReady) {
+            refreshAccount()
+            autoDetectDestination()
+        }
     }
 
     init {
@@ -129,6 +138,70 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
                 .distinct()
                 .sorted()
             _availableBuckets.value = buckets
+        }
+    }
+
+    fun loadGroups() = guard {
+        _groups.value = td.myGroups()
+    }
+
+    /** Picks a group as destination; auto-detects forum topics named Pics/Vids/General. */
+    fun setDestination(chatId: Long, title: String) = guard {
+        val topics = runCatching { td.forumTopics(chatId) }.getOrDefault(emptyList())
+        fun topic(name: String) = topics.firstOrNull { it.second.equals(name, ignoreCase = true) }?.first ?: 0L
+        prefs.edit()
+            .putLong("destChatId", chatId)
+            .putString("destTitle", title)
+            .putLong("topicPics", topic("Pics"))
+            .putLong("topicVids", topic("Vids"))
+            .putLong("topicGeneral", topic("General"))
+            .apply()
+        _destTitle.value = title
+        _error.value = if (topic("Pics") != 0L && topic("Vids") != 0L)
+            "Destination: $title (photos to Pics, videos to Vids)"
+        else
+            "Destination: $title (no Pics/Vids topics found - files go to the group directly)"
+    }
+
+    fun setDestinationSavedMessages() {
+        prefs.edit()
+            .putLong("destChatId", 0L)
+            .putString("destTitle", "Saved Messages")
+            .putLong("topicPics", 0L).putLong("topicVids", 0L).putLong("topicGeneral", 0L)
+            .apply()
+        _destTitle.value = "Saved Messages"
+    }
+
+    /** Manuel's manual-ID entry (01:29): store chat/topic ids directly. */
+    fun setDestinationManual(chatId: Long, pics: Long, vids: Long, general: Long) {
+        prefs.edit()
+            .putLong("destChatId", chatId)
+            .putString("destTitle", "Custom chat $chatId")
+            .putLong("topicPics", pics)
+            .putLong("topicVids", vids)
+            .putLong("topicGeneral", general)
+            .apply()
+        _destTitle.value = "Custom chat $chatId"
+    }
+
+    /** Auto-defaults to his backup group when nothing was chosen yet. */
+    private fun autoDetectDestination() {
+        if (prefs.getLong("destChatId", 0L) != 0L) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val groups = runCatching { td.myGroups() }.getOrDefault(emptyList())
+            val match = groups.firstOrNull { it.second.startsWith("Backup Pics Vids", ignoreCase = true) }
+            if (match != null) {
+                val topics = runCatching { td.forumTopics(match.first) }.getOrDefault(emptyList())
+                fun topic(name: String) = topics.firstOrNull { t -> t.second.equals(name, ignoreCase = true) }?.first ?: 0L
+                prefs.edit()
+                    .putLong("destChatId", match.first)
+                    .putString("destTitle", match.second)
+                    .putLong("topicPics", topic("Pics"))
+                    .putLong("topicVids", topic("Vids"))
+                    .putLong("topicGeneral", topic("General"))
+                    .apply()
+                _destTitle.value = match.second
+            }
         }
     }
 

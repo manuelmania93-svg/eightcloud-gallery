@@ -83,6 +83,111 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
         }
         viewModel.backUpNow()
     }
+    if (showDestDialog) {
+        AlertDialog(
+            onDismissRequest = { showDestDialog = false },
+            title = { Text("Backup destination") },
+            text = {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.setDestinationSavedMessages()
+                                showDestDialog = false
+                            }
+                            .padding(vertical = 8.dp)
+                    ) { Text("Saved Messages (private)") }
+                    for ((id, title) in groups) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.setDestination(id, title)
+                                    showDestDialog = false
+                                }
+                                .padding(vertical = 8.dp)
+                        ) { Text(title) }
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showDestDialog = false
+                                showManualDialog = true
+                            }
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Enter IDs manually...",
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDestDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (showManualDialog) {
+        var chatIdText by remember { mutableStateOf("") }
+        var picsText by remember { mutableStateOf("") }
+        var vidsText by remember { mutableStateOf("") }
+        var generalText by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showManualDialog = false },
+            title = { Text("Destination IDs") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = chatIdText,
+                        onValueChange = { chatIdText = it },
+                        label = { Text("Chat / group ID") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = picsText,
+                        onValueChange = { picsText = it },
+                        label = { Text("Pics topic ID (optional)") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = vidsText,
+                        onValueChange = { vidsText = it },
+                        label = { Text("Vids topic ID (optional)") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = generalText,
+                        onValueChange = { generalText = it },
+                        label = { Text("General topic ID (optional)") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chatId = chatIdText.trim().toLongOrNull()
+                    if (chatId != null) {
+                        viewModel.setDestinationManual(
+                            chatId,
+                            picsText.trim().toLongOrNull() ?: 0L,
+                            vidsText.trim().toLongOrNull() ?: 0L,
+                            generalText.trim().toLongOrNull() ?: 0L
+                        )
+                    }
+                    showManualDialog = false
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showManualDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
     if (showFreeUpDialog) {
         val (freeBytes, freeCount) = deletableBytes
         AlertDialog(
@@ -114,6 +219,10 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     }
     val backupBuckets by viewModel.backupBuckets.collectAsState()
     val availableBuckets by viewModel.availableBuckets.collectAsState()
+    val destTitle by viewModel.destTitle.collectAsState()
+    val groups by viewModel.groups.collectAsState()
+    var showDestDialog by remember { mutableStateOf(false) }
+    var showManualDialog by remember { mutableStateOf(false) }
     val pending by viewModel.pending.collectAsState()
     val backupEnabled by viewModel.backupEnabled.collectAsState()
     val wifiOnly by viewModel.wifiOnly.collectAsState()
@@ -150,6 +259,25 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp)
                     )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Backup destination")
+                            Text(
+                                destTitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = {
+                            viewModel.loadGroups()
+                            showDestDialog = true
+                        }) { Text("Change") }
+                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
