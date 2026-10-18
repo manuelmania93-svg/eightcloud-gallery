@@ -11,6 +11,7 @@ import app.eightcloud.gallery.data.Hasher
 import app.eightcloud.gallery.data.MediaItem
 import app.eightcloud.gallery.data.MediaStoreSource
 import app.eightcloud.gallery.telegram.TdClient
+import app.eightcloud.gallery.telegram.TdException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.TdApi

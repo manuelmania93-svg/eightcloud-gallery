@@ -7,7 +7,7 @@ import app.eightcloud.gallery.BuildConfig
 import app.eightcloud.gallery.crypto.BackupCrypto
 import app.eightcloud.gallery.crypto.KeystoreKeys
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.resumeWithException
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
