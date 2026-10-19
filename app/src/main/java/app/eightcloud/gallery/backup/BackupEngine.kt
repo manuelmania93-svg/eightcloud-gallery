@@ -449,8 +449,8 @@ class BackupEngine(private val context: Context) {
                 }
             }
         }
-        val ivHex = entry.chunkIvs.split(',').first().trim()
-        val iv = ivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        // The IV is stored Base64-encoded (same format uploadParts writes).
+        val iv = Base64.decode(entry.chunkIvs.split(',').first().trim(), Base64.NO_WRAP)
 
         val isVideo = entry.isVideo
         val collection = if (isVideo)
@@ -494,6 +494,56 @@ class BackupEngine(private val context: Context) {
                 lastSeenAt = System.currentTimeMillis()
             )
         )
+    }
+
+    suspend fun entryFor(mediaStoreId: Long): BackupEntry? = withContext(Dispatchers.IO) {
+        db.dao().byMediaStoreId(mediaStoreId)
+    }
+
+    /**
+     * Downloads and decrypts a backed-up entry into the app cache so it can
+     * be shared via FileProvider without restoring it to MediaStore.
+     */
+    suspend fun decryptToCache(entry: BackupEntry): File = withContext(Dispatchers.IO) {
+        val chatId = destinationChat()
+        val key = KeystoreKeys.backupKey()
+        val msgIds = entry.telegramMessageIds.split(',')
+            .mapNotNull { it.trim().toLongOrNull() }
+            .sorted()
+            .toLongArray()
+        require(msgIds.isNotEmpty()) { "no telegram messages recorded" }
+        val messages = td.getMessages(chatId, msgIds)
+        val parts = messages.messages.filterNotNull().sortedBy { it.id }.map { msg ->
+            val doc = (msg.content as? TdApi.MessageDocument)?.document
+                ?: throw IllegalStateException("message ${msg.id} is not a document")
+            td.downloadFile(doc.document.id)
+        }
+        val checksums = entry.partChecksums.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        parts.forEachIndexed { i, path ->
+            if (i < checksums.size) {
+                val actual = FileInputStream(File(path)).use { Hasher.sha256Hex(it) }
+                if (!actual.equals(checksums[i], ignoreCase = true)) {
+                    throw IllegalStateException("checksum mismatch on part ${i + 1}")
+                }
+            }
+        }
+        val iv = Base64.decode(entry.chunkIvs.split(',').first().trim(), Base64.NO_WRAP)
+        val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+        val out = File(dir, entry.name)
+        FileOutputStream(out).use { fileOut ->
+            if (parts.size == 1) {
+                FileInputStream(File(parts[0])).use { input ->
+                    BackupCrypto.decryptStream(key, iv, input, fileOut)
+                }
+            } else {
+                val streams = parts.map { FileInputStream(File(it)) as InputStream }
+                SequenceInputStream(java.util.Collections.enumeration(streams)).use { input ->
+                    BackupCrypto.decryptStream(key, iv, input, fileOut)
+                }
+            }
+        }
+        app.eightcloud.gallery.AppLog.log("share", "cloud copy decrypted: " + entry.name)
+        out
     }
 
     private fun uriFor(entry: BackupEntry): Uri {

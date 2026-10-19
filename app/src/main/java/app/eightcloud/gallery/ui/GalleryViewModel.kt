@@ -547,6 +547,38 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         _cleanupIndex.value--
     }
 
+    private val _sharing = MutableStateFlow(false)
+    val sharing: StateFlow<Boolean> = _sharing
+
+    /** Downloads + decrypts the cloud copy of a backed-up item, then hands the cache file over. */
+    fun shareFromCloud(item: MediaItem, onReady: (java.io.File) -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            _sharing.value = true
+            try {
+                val td = app.eightcloud.gallery.telegram.TdClient.get(getApplication())
+                td.start()
+                if (td.authState !is org.drinkless.tdlib.TdApi.AuthorizationStateReady) {
+                    onError("Telegram backup is not connected")
+                    return@launch
+                }
+                val engine = app.eightcloud.gallery.backup.BackupEngine(getApplication())
+                val entry = engine.entryFor(item.id)
+                if (entry == null ||
+                    (entry.status != app.eightcloud.gallery.backup.BackupEntry.BACKED_UP &&
+                        entry.status != app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY)
+                ) {
+                    onError("No cloud copy of this item")
+                    return@launch
+                }
+                onReady(engine.decryptToCache(entry))
+            } catch (e: Exception) {
+                onError(e.message ?: e.javaClass.simpleName)
+            } finally {
+                _sharing.value = false
+            }
+        }
+    }
+
     suspend fun loadDetails(item: MediaItem): MediaDetails = withContext(Dispatchers.IO) {
         DetailsLoader.load(getApplication(), item)
     }

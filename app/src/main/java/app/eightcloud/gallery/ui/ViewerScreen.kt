@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -98,6 +99,55 @@ fun ViewerScreen(viewModel: GalleryViewModel) {
                 }
             },
             actions = {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val statusById by viewModel.statusById.collectAsState()
+                val featureToggles by viewModel.featureToggles.collectAsState()
+                val sharing by viewModel.sharing.collectAsState()
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                val itemStatus = statusById[currentItem.id]
+                val hasCloudCopy = itemStatus == app.eightcloud.gallery.backup.BackupEntry.BACKED_UP ||
+                    itemStatus == app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY
+                val cloudOnlyHidden = itemStatus == app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY &&
+                    featureToggles["feat_cloud_share"] == false
+                if (!cloudOnlyHidden) IconButton(
+                    enabled = !sharing,
+                    onClick = {
+                        val cloudOnly = itemStatus == app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY
+                        if (!cloudOnly) {
+                            // Local copy: share straight from MediaStore.
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = currentItem.mimeType.ifBlank { "*/*" }
+                                putExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri.parse(currentItem.uri))
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(android.content.Intent.createChooser(send, "Share"))
+                        } else {
+                            viewModel.shareFromCloud(
+                                currentItem,
+                                onReady = { file ->
+                                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                                        context, context.packageName + ".fileprovider", file
+                                    )
+                                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                        type = currentItem.mimeType.ifBlank { "*/*" }
+                                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(android.content.Intent.createChooser(send, "Share"))
+                                },
+                                onError = { msg ->
+                                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    }
+                ) {
+                    Icon(
+                        Icons.Filled.Share,
+                        contentDescription = if (itemStatus == app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY) "Share cloud copy" else "Share",
+                        tint = if (sharing) Color.Gray else Color.White
+                    )
+                }
                 IconButton(onClick = { showInfo = !showInfo }) {
                     Icon(Icons.Filled.Info, contentDescription = "Info", tint = Color.White)
                 }
