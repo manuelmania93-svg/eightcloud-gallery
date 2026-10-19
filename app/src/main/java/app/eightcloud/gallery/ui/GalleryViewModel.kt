@@ -629,19 +629,29 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             computeCategoryAlbums()
             if (!overridesLoaded) loadCategoryOverrides()
+            val videoLabels = _featureToggles.value["feat_video_labels"] != false
+            val failed = mutableSetOf<Long>() // don't retry failures within one run
             while (true) {
                 val done = _mediaLabels.value
                 val current = app.eightcloud.gallery.labels.MediaScanner.CURRENT_SCAN_VERSION
                 val pending = allItems.filter {
-                    !it.isVideo && (it.id !in done || (done[it.id]?.scanVersion ?: 0) < current)
+                    (!it.isVideo || videoLabels) && it.id !in failed &&
+                        (it.id !in done || (done[it.id]?.scanVersion ?: 0) < current)
                 }
                 if (pending.isEmpty()) break
                 _labelScanProgress.value = (allItems.size - pending.size) to allItems.size
                 pending.take(25).forEach { item ->
-                    runCatching {
-                        scanner.scan(item.id, android.net.Uri.parse(item.uri))
-                    }.getOrNull()?.let { entry ->
+                    val entry = runCatching {
+                        if (item.isVideo) {
+                            scanner.scanVideo(item.id, android.net.Uri.parse(item.uri))
+                        } else {
+                            scanner.scan(item.id, android.net.Uri.parse(item.uri))
+                        }
+                    }.getOrNull()
+                    if (entry != null) {
                         _mediaLabels.value = _mediaLabels.value + (entry.mediaStoreId to entry)
+                    } else {
+                        failed += item.id
                     }
                 }
                 computeCategoryAlbums()

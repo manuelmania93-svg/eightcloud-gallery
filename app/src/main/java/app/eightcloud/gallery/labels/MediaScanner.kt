@@ -45,6 +45,40 @@ class MediaScanner(private val context: Context) {
     /** Scan one image; returns null when the bitmap cannot be decoded. */
     suspend fun scan(mediaStoreId: Long, uri: Uri): MediaLabelEntry? {
         val bitmap = loadBitmap(uri, 1024) ?: return null
+        return analyzeBitmap(mediaStoreId, bitmap)
+    }
+
+    /**
+     * Scan one video via a frame at 30% of its duration. Videos only get the
+     * visual analysis (no OCR intent, but the pipeline is the same).
+     */
+    suspend fun scanVideo(mediaStoreId: Long, uri: Uri): MediaLabelEntry? {
+        val retriever = android.media.MediaMetadataRetriever()
+        val frame = runCatching {
+            retriever.setDataSource(context, uri)
+            val durationMs = retriever
+                .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            retriever.getFrameAtTime(
+                durationMs * 300,
+                android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            )
+        }.getOrNull()
+        runCatching { retriever.release() }
+        val bitmap = frame ?: return null
+        val scaled = if (bitmap.width > 1024 || bitmap.height > 1024) {
+            val scale = 1024f / maxOf(bitmap.width, bitmap.height)
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else bitmap
+        return analyzeBitmap(mediaStoreId, scaled)
+    }
+
+    private suspend fun analyzeBitmap(mediaStoreId: Long, bitmap: Bitmap): MediaLabelEntry? {
         val image = InputImage.fromBitmap(bitmap, 0)
         val faces = runCatching { faceDetector.process(image).await() }.getOrNull()
         val labels = runCatching { labeler.process(image).await() }.getOrNull()
