@@ -159,6 +159,18 @@ fun ViewerScreen(viewModel: GalleryViewModel) {
                         tint = if (sharing) Color.Gray else Color.White
                     )
                 }
+                if (itemStatus != app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY) {
+                    IconButton(onClick = {
+                        viewModel.trashIds(setOf(currentItem.id))
+                        viewModel.backToGrid()
+                    }) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.DeleteOutline,
+                            contentDescription = "Move to trash",
+                            tint = Color.White
+                        )
+                    }
+                }
                 IconButton(onClick = { showInfo = !showInfo }) {
                     Icon(Icons.Filled.Info, contentDescription = "Info", tint = Color.White)
                 }

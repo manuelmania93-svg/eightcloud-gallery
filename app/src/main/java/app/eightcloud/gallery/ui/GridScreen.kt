@@ -270,7 +270,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
                             Icon(Icons.Filled.DeleteOutline, contentDescription = "Move to trash")
                         }
                         IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete local copies (frees space, backed-up items only)")
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete permanently")
                         }
                     }
                 )
@@ -532,35 +532,37 @@ fun GridScreen(viewModel: GalleryViewModel) {
     }
 
     if (showDeleteDialog) {
-        val deletable = items.filter { it.id in selection && statusById[it.id] == BackupEntry.BACKED_UP }
+        val chosen = items.filter { it.id in selection }
+        val notBackedUp = chosen.count { statusById[it.id] != BackupEntry.BACKED_UP }
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Free up space") },
+            title = { Text("Delete permanently") },
             text = {
                 Text(
-                    if (deletable.isEmpty())
-                        "None of the selected items are verified in your cloud backup yet, so nothing can be deleted."
-                    else
-                        "Delete ${deletable.size} local copies? All of them are verified in your cloud backup." +
-                            if (deletable.size < selection.size) " (${selection.size - deletable.size} selected items are not backed up and will be kept.)" else ""
+                    "Delete ${chosen.size} selected items permanently?" +
+                        (if (notBackedUp > 0)
+                            " $notBackedUp of them are NOT backed up in the cloud and cannot be recovered."
+                        else
+                            " All of them are backed up in the cloud and can be restored from the Backup tab.") +
+                        " To keep them recoverable for 30 days, cancel and use Move to trash instead."
                 )
             },
             confirmButton = {
                 TextButton(
-                    enabled = deletable.isNotEmpty(),
+                    enabled = chosen.isNotEmpty(),
                     onClick = {
                         showDeleteDialog = false
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             val request = MediaStore.createDeleteRequest(
                                 context.contentResolver,
-                                deletable.map { Uri.parse(it.uri) }
+                                chosen.map { Uri.parse(it.uri) }
                             )
                             deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
                         } else {
                             Toast.makeText(context, "Needs Android 11 or newer", Toast.LENGTH_LONG).show()
                         }
                     }
-                ) { Text("Delete") }
+                ) { Text("Delete permanently") }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }

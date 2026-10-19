@@ -101,7 +101,8 @@ class BackupEngine(private val context: Context) {
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         val selectedOnly = prefs.getString("backupScope", "ALL") == "SELECTED"
         val buckets = prefs.getStringSet("backupBuckets", emptySet()) ?: emptySet()
-        val items = MediaStoreSource.query(context)
+        val allLocal = MediaStoreSource.query(context)
+        val items = allLocal
             .filter { if (onlyIds != null) it.id in onlyIds else (!selectedOnly || it.bucket in buckets) }
         var added = 0
         val now = System.currentTimeMillis()
@@ -123,7 +124,12 @@ class BackupEngine(private val context: Context) {
                             name = item.name,
                             sizeBytes = item.sizeBytes,
                             isVideo = item.isVideo,
-                            lastSeenAt = now
+                            lastSeenAt = now,
+                            // With an IV recorded (index import) the cloud copy
+                            // is restorable, so local+cloud = fully backed up.
+                            status = if (existing.status == BackupEntry.CLOUD_ONLY &&
+                                existing.chunkIvs.isNotBlank()
+                            ) BackupEntry.BACKED_UP else existing.status
                         )
                     )
                 }
@@ -144,6 +150,21 @@ class BackupEngine(private val context: Context) {
                 )
             )
             added++
+        }
+        if (onlyIds == null) {
+            // Local copy gone (deleted or freed): flip BACKED_UP rows to
+            // CLOUD_ONLY so they show up in the restore tab again.
+            val presentIds = allLocal.mapTo(HashSet()) { it.id }
+            var orphaned = 0
+            db.dao().byStatus(BackupEntry.BACKED_UP).forEach { e ->
+                if (e.mediaStoreId != 0L && e.mediaStoreId !in presentIds) {
+                    db.dao().upsert(e.copy(status = BackupEntry.CLOUD_ONLY))
+                    orphaned++
+                }
+            }
+            if (orphaned > 0) {
+                app.eightcloud.gallery.AppLog.log("backup", "scan: " + orphaned + " local copies gone, marked cloud-only")
+            }
         }
         app.eightcloud.gallery.AppLog.log("backup", "scan done: " + added + " new of " + items.size)
         added
