@@ -23,6 +23,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
@@ -165,7 +166,7 @@ fun ViewerScreen(viewModel: GalleryViewModel) {
                         viewModel.backToGrid()
                     }) {
                         Icon(
-                            androidx.compose.material.icons.Icons.Filled.DeleteOutline,
+                            Icons.Filled.DeleteOutline,
                             contentDescription = "Move to trash",
                             tint = Color.White
                         )
