@@ -1,5 +1,9 @@
 package app.eightcloud.gallery
 
+import coil.Coil
+import coil.ImageLoader
+import coil.decode.VideoFrameDecoderFactory
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -42,6 +46,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // VideoFrameDecoder so video thumbnails actually render in the grid.
+        Coil.setImageLoader(
+            ImageLoader.Builder(this)
+                .components { add(VideoFrameDecoderFactory()) }
+                .build()
+        )
         setContent {
             EightCloudApp()
         }

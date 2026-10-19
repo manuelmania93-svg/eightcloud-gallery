@@ -200,45 +200,61 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun applyView() {
-        var view = allItems
-        if (_favoritesOnly.value) view = view.filter { _favorites.value.contains(it.id) }
-        if (_videosOnly.value) view = view.filter { it.isVideo }
+        // Snapshot state, then run filter/sort/count off the main thread:
+        // with ~40k items the full pass takes too long for the UI thread.
+        val favorites = _favorites.value
+        val favoritesOnly = _favoritesOnly.value
+        val videosOnly = _videosOnly.value
         val query = _searchQuery.value.trim()
-        if (query.isNotEmpty()) {
-            view = view.filter { item ->
-                item.name.contains(query, ignoreCase = true) ||
-                    runCatching {
-                        val day = java.time.Instant.ofEpochMilli(item.dateMillis)
-                            .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-                        day.toString().startsWith(query) ||
-                            day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
-                                .contains(query, ignoreCase = true)
-                    }.getOrDefault(false)
-            }
-        }
-        if (_statusFilter.value != StatusFilter.ALL) {
-            val map = _statusById.value
-            view = view.filter { item ->
-                when (_statusFilter.value) {
-                    StatusFilter.BACKED_UP -> map[item.id] == BackupEntry.BACKED_UP
-                    StatusFilter.CLOUD_ONLY -> map[item.id] == BackupEntry.CLOUD_ONLY
-                    StatusFilter.PENDING ->
-                        map[item.id] != BackupEntry.BACKED_UP && map[item.id] != BackupEntry.CLOUD_ONLY
-                    StatusFilter.ALL -> true
+        val statusFilter = _statusFilter.value
+        val field = _sortField.value
+        val ascending = _sortAscending.value
+        val statusMap = _statusById.value
+        val source = allItems
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                var view = source
+                if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
+                if (videosOnly) view = view.filter { it.isVideo }
+                if (query.isNotEmpty()) {
+                    view = view.filter { item ->
+                        item.name.contains(query, ignoreCase = true) ||
+                            runCatching {
+                                val day = java.time.Instant.ofEpochMilli(item.dateMillis)
+                                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                                day.toString().startsWith(query) ||
+                                    day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+                                        .contains(query, ignoreCase = true)
+                            }.getOrDefault(false)
+                    }
                 }
+                if (statusFilter != StatusFilter.ALL) {
+                    view = view.filter { item ->
+                        when (statusFilter) {
+                            StatusFilter.BACKED_UP -> statusMap[item.id] == BackupEntry.BACKED_UP
+                            StatusFilter.CLOUD_ONLY -> statusMap[item.id] == BackupEntry.CLOUD_ONLY
+                            StatusFilter.PENDING ->
+                                statusMap[item.id] != BackupEntry.BACKED_UP &&
+                                    statusMap[item.id] != BackupEntry.CLOUD_ONLY
+                            StatusFilter.ALL -> true
+                        }
+                    }
+                }
+                val sorted = view.sortedWith(MediaSort.comparator(field, ascending))
+                val counts = mapOf(
+                    StatusFilter.ALL to source.size,
+                    StatusFilter.BACKED_UP to source.count { statusMap[it.id] == BackupEntry.BACKED_UP },
+                    StatusFilter.PENDING to source.count {
+                        statusMap[it.id] != BackupEntry.BACKED_UP &&
+                            statusMap[it.id] != BackupEntry.CLOUD_ONLY
+                    },
+                    StatusFilter.CLOUD_ONLY to source.count { statusMap[it.id] == BackupEntry.CLOUD_ONLY }
+                )
+                sorted to counts
             }
+            _items.value = result.first
+            _sectionCounts.value = result.second
         }
-        _items.value = view.sortedWith(MediaSort.comparator(_sortField.value, _sortAscending.value))
-
-        val map = _statusById.value
-        _sectionCounts.value = mapOf(
-            StatusFilter.ALL to allItems.size,
-            StatusFilter.BACKED_UP to allItems.count { map[it.id] == BackupEntry.BACKED_UP },
-            StatusFilter.PENDING to allItems.count {
-                map[it.id] != BackupEntry.BACKED_UP && map[it.id] != BackupEntry.CLOUD_ONLY
-            },
-            StatusFilter.CLOUD_ONLY to allItems.count { map[it.id] == BackupEntry.CLOUD_ONLY }
-        )
     }
 
     private fun loadFavorites(): Set<Long> =

@@ -12,7 +12,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -285,14 +289,27 @@ fun GridScreen(viewModel: GalleryViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(columns) {
-                            detectTransformGestures { _, _, zoom, _ ->
-                                zoomAccumulator *= zoom
-                                if (zoomAccumulator > 1.3f && columns > MediaSort.MIN_COLUMNS) {
-                                    viewModel.setColumns(columns - 1)
-                                    zoomAccumulator = 1f
-                                } else if (zoomAccumulator < 0.77f && columns < MediaSort.MAX_COLUMNS) {
-                                    viewModel.setColumns(columns + 1)
-                                    zoomAccumulator = 1f
+                            // Pinch-to-zoom only: consume only when 2+ fingers are
+                            // down, so single-finger scrolling is never eaten.
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.none { it.pressed }) break
+                                    if (event.changes.count { it.pressed } > 1) {
+                                        val zoom = event.calculateZoom()
+                                        zoomAccumulator *= zoom
+                                        if (zoomAccumulator > 1.3f && columns > MediaSort.MIN_COLUMNS) {
+                                            viewModel.setColumns(columns - 1)
+                                            zoomAccumulator = 1f
+                                        } else if (zoomAccumulator < 0.77f && columns < MediaSort.MAX_COLUMNS) {
+                                            viewModel.setColumns(columns + 1)
+                                            zoomAccumulator = 1f
+                                        }
+                                        event.changes.forEach {
+                                            if (it.position != it.previousPosition) it.consume()
+                                        }
+                                    }
                                 }
                             }
                         },
@@ -601,6 +618,7 @@ private fun StatusFilterRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -617,6 +635,8 @@ private fun StatusFilterRow(
             ) {
                 Text(
                     text = "$label ($count)",
+                    maxLines = 1,
+                    softWrap = false,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimary
@@ -641,6 +661,8 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             text = label,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelMedium,
             color = if (selected) MaterialTheme.colorScheme.onPrimary
