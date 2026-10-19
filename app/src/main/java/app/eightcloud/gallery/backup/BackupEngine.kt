@@ -88,6 +88,9 @@ class BackupEngine(private val context: Context) {
     private val chunkSizeBytes = 1_500_000_000L
 
     companion object {
+        private val DOC_EXTS = setOf(
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "txt", "csv", "rtf", "epub"
+        )
         // Official free-account per-file cap (telegram.org/faq).
         const val TELEGRAM_FREE_MAX_BYTES = 2_000_000_000L
     }
@@ -104,6 +107,7 @@ class BackupEngine(private val context: Context) {
         val allLocal = MediaStoreSource.query(context)
         val items = allLocal
             .filter { if (onlyIds != null) it.id in onlyIds else (!selectedOnly || it.bucket in buckets) }
+            .plus(if (onlyIds == null) documentCandidates(prefs) else emptyList())
         var added = 0
         val now = System.currentTimeMillis()
         for (item in items) {
@@ -157,7 +161,7 @@ class BackupEngine(private val context: Context) {
             val presentIds = allLocal.mapTo(HashSet()) { it.id }
             var orphaned = 0
             db.dao().byStatus(BackupEntry.BACKED_UP).forEach { e ->
-                if (e.mediaStoreId != 0L && e.mediaStoreId !in presentIds) {
+                if (e.mediaStoreId != 0L && !isDocName(e.name) && e.mediaStoreId !in presentIds) {
                     db.dao().upsert(e.copy(status = BackupEntry.CLOUD_ONLY))
                     orphaned++
                 }
@@ -897,14 +901,20 @@ class BackupEngine(private val context: Context) {
         val iv = Base64.decode(entry.chunkIvs.split(',').first().trim(), Base64.NO_WRAP)
 
         val isVideo = entry.isVideo
-        val collection = if (isVideo)
+        val isDoc = isDocName(entry.name)
+        val collection = if (isDoc)
+            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        else if (isVideo)
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         else
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, entry.name)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, if (isVideo) "Movies/8CloudGallery" else "Pictures/8CloudGallery")
+                put(
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    if (isDoc) "Documents/8CloudGallery" else if (isVideo) "Movies/8CloudGallery" else "Pictures/8CloudGallery"
+                )
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         }
@@ -990,7 +1000,50 @@ class BackupEngine(private val context: Context) {
         out
     }
 
+    /** Documents are tracked with a synthetic negative id; the path lives in a small prefs map. */
+    private fun documentCandidates(prefs: android.content.SharedPreferences): List<MediaItem> {
+        if (!prefs.getBoolean("backupDocuments", false)) return emptyList()
+        if (!app.eightcloud.gallery.ui.hasAllFilesAccess()) return emptyList()
+        val docs = runCatching {
+            app.eightcloud.gallery.ui.scanDocuments(android.os.Environment.getExternalStorageDirectory())
+        }.getOrDefault(emptyList())
+        val map = JSONObject(prefs.getString("docPaths", "{}") ?: "{}")
+        val out = docs.map { d ->
+            val id = -(1L + (d.path.hashCode().toLong() and 0x7fffffffL))
+            map.put(id.toString(), d.path)
+            MediaItem(
+                id = id,
+                uri = Uri.fromFile(File(d.path)).toString(),
+                isVideo = false,
+                name = d.name,
+                dateMillis = d.modified,
+                sizeBytes = d.size,
+                width = 0,
+                height = 0,
+                durationMs = 0L,
+                bucket = "Documents",
+                mimeType = ""
+            )
+        }
+        prefs.edit().putString("docPaths", map.toString()).apply()
+        return out
+    }
+
+    private fun isDocName(name: String): Boolean =
+        name.substringAfterLast('.', "").lowercase() in DOC_EXTS
+
     private fun uriFor(entry: BackupEntry): Uri {
+        if (isDocName(entry.name)) {
+            if (entry.mediaStoreId < 0) {
+                val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                val path = JSONObject(prefs.getString("docPaths", "{}") ?: "{}")
+                    .optString(entry.mediaStoreId.toString())
+                return Uri.fromFile(File(path))
+            }
+            return ContentUris.withAppendedId(
+                MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), entry.mediaStoreId
+            )
+        }
         val base = if (entry.isVideo)
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         else
