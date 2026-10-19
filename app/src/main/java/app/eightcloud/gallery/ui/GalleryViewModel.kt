@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP, SLIDESHOW }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 data class SmartAlbum(val key: String, val title: String, val count: Int)
@@ -352,6 +352,39 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openSettings() { _screen.value = Screen.SETTINGS }
+
+    // Slideshow preferences + screen.
+    private val _slideshowOrder = MutableStateFlow(prefs.getString("slideshowOrder", "DATE")!!)
+    val slideshowOrder: StateFlow<String> = _slideshowOrder
+    private val _slideshowSpeedSec = MutableStateFlow(prefs.getInt("slideshowSpeedSec", 4))
+    val slideshowSpeedSec: StateFlow<Int> = _slideshowSpeedSec
+    private val _slideshowLoop = MutableStateFlow(prefs.getBoolean("slideshowLoop", true))
+    val slideshowLoop: StateFlow<Boolean> = _slideshowLoop
+    private val _slideshowMusicUri = MutableStateFlow(prefs.getString("slideshowMusic", null))
+    val slideshowMusicUri: StateFlow<String?> = _slideshowMusicUri
+
+    fun setSlideshowOrder(order: String) {
+        _slideshowOrder.value = order
+        prefs.edit().putString("slideshowOrder", order).apply()
+    }
+
+    fun setSlideshowSpeedSec(sec: Int) {
+        _slideshowSpeedSec.value = sec.coerceIn(2, 15)
+        prefs.edit().putInt("slideshowSpeedSec", _slideshowSpeedSec.value).apply()
+    }
+
+    fun setSlideshowLoop(loop: Boolean) {
+        _slideshowLoop.value = loop
+        prefs.edit().putBoolean("slideshowLoop", loop).apply()
+    }
+
+    fun setSlideshowMusic(uri: String?) {
+        _slideshowMusicUri.value = uri
+        if (uri == null) prefs.edit().remove("slideshowMusic").apply()
+        else prefs.edit().putString("slideshowMusic", uri).apply()
+    }
+
+    fun openSlideshow() { _screen.value = Screen.SLIDESHOW }
     fun openAlbums() { _screen.value = Screen.ALBUMS }
     fun openTrash() { _screen.value = Screen.TRASH }
     fun openDuplicates() { _screen.value = Screen.DUPLICATES }

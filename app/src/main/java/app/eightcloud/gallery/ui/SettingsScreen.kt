@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -51,8 +52,13 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val featureToggles by viewModel.featureToggles.collectAsState()
+    val slideshowOrder by viewModel.slideshowOrder.collectAsState()
+    val slideshowSpeedSec by viewModel.slideshowSpeedSec.collectAsState()
+    val slideshowLoop by viewModel.slideshowLoop.collectAsState()
+    val slideshowMusicUri by viewModel.slideshowMusicUri.collectAsState()
 
     BackHandler { viewModel.backToGrid() }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         topBar = {
@@ -169,6 +175,118 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             }
         }
 
+        if (featureToggles["feat_slideshow"] != false) {
+            var showSlideshowDialog by remember { mutableStateOf(false) }
+            val musicPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null) {
+                    runCatching {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    }
+                    viewModel.setSlideshowMusic(uri.toString())
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showSlideshowDialog = true }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column(modifier = Modifier.padding(start = 12.dp)) {
+                    Text("Slideshow", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Order, speed, music - plays the current view",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (showSlideshowDialog) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showSlideshowDialog = false },
+                    title = { Text("Slideshow") },
+                    text = {
+                        Column {
+                            Text("Order", style = MaterialTheme.typography.titleSmall)
+                            listOf("DATE" to "By date", "RANDOM" to "Random").forEach { (value, label) ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.setSlideshowOrder(value) }
+                                ) {
+                                    RadioButton(
+                                        selected = slideshowOrder == value,
+                                        onClick = { viewModel.setSlideshowOrder(value) }
+                                    )
+                                    Text(label)
+                                }
+                            }
+                            Text(
+                                "Speed: ${slideshowSpeedSec}s per photo",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                            Slider(
+                                value = slideshowSpeedSec.toFloat(),
+                                onValueChange = { viewModel.setSlideshowSpeedSec(it.toInt()) },
+                                valueRange = 2f..15f
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Loop", modifier = Modifier.weight(1f))
+                                androidx.compose.material3.Switch(
+                                    checked = slideshowLoop,
+                                    onCheckedChange = { viewModel.setSlideshowLoop(it) }
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (slideshowMusicUri != null) "Music: selected" else "No music",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                androidx.compose.material3.TextButton(onClick = {
+                                    musicPicker.launch(arrayOf("audio/*"))
+                                }) { Text("Pick") }
+                                if (slideshowMusicUri != null) {
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        viewModel.setSlideshowMusic(null)
+                                    }) { Text("Clear") }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            showSlideshowDialog = false
+                            viewModel.openSlideshow()
+                        }) { Text("Start") }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            showSlideshowDialog = false
+                        }) { Text("Cancel") }
+                    }
+                )
+            }
+        }
+
         if (featureToggles["feat_cleanup"] != false) {
             Row(
                 modifier = Modifier
@@ -230,7 +348,6 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
 
         // Crash log: if the app died unexpectedly, the last stack trace can
         // be viewed and shared from here after the restart.
-        val context = androidx.compose.ui.platform.LocalContext.current
         var crashLog by remember { mutableStateOf(app.eightcloud.gallery.CrashLogger.read(context)) }
         var showCrashDialog by remember { mutableStateOf(false) }
         if (crashLog != null) {
