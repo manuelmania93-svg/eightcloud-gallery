@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
 import app.eightcloud.gallery.ui.AlbumsScreen
+import app.eightcloud.gallery.ui.DocumentsScreen
 import app.eightcloud.gallery.ui.DuplicatesScreen
 import app.eightcloud.gallery.ui.EditScreen
 import app.eightcloud.gallery.ui.MapScreen
@@ -262,6 +263,7 @@ fun EightCloudApp() {
                             Screen.SLIDESHOW -> SlideshowScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.EDIT -> EditScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.MAP -> MapScreen(viewModel, onBack = { viewModel.backToGrid() })
+                            Screen.DOCUMENTS -> DocumentsScreen(onBack = { viewModel.backToGrid() })
                             Screen.SECURE -> SecureFolderScreen(
                                 viewModel,
                                 onBack = { viewModel.backToGrid() },

@@ -66,6 +66,16 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            if (featureToggles["feat_documents"] != false) {
+                item(key = "row-documents") {
+                    AlbumRow(
+                        title = "Documents",
+                        count = -1,
+                        onClick = { viewModel.openDocuments() }
+                    )
+                    HorizontalDivider()
+                }
+            }
             item(key = "hdr-cats") {
                 Text(
                     "Categories" + labelScanProgress.let { p ->
@@ -261,7 +271,7 @@ private fun AlbumRow(title: String, count: Int, onClick: () -> Unit) {
         Column(modifier = Modifier.padding(start = 12.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
-                "$count items",
+                if (count < 0) "PDFs and other files on this phone" else "$count items",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP, SLIDESHOW, SECURE, EDIT, MAP }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP, SLIDESHOW, SECURE, EDIT, MAP, DOCUMENTS }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 data class SmartAlbum(val key: String, val title: String, val count: Int)
@@ -445,6 +445,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openMap() { _screen.value = Screen.MAP }
+
+    fun openDocuments() { _screen.value = Screen.DOCUMENTS }
 
     // Map: EXIF GPS points, scanned incrementally in the background.
     private val _geoPoints = MutableStateFlow<List<app.eightcloud.gallery.data.GeoIndex.Point>>(emptyList())
