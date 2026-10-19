@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -203,8 +204,11 @@ fun GridScreen(viewModel: GalleryViewModel) {
                         }) {
                             Icon(Icons.Filled.Share, contentDescription = "Share selected")
                         }
+                        IconButton(onClick = { viewModel.trashSelection() }) {
+                            Icon(Icons.Filled.DeleteOutline, contentDescription = "Move to trash")
+                        }
                         IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete local copies")
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete local copies (frees space, backed-up items only)")
                         }
                     }
                 )

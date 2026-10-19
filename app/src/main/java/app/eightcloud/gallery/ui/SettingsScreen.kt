@@ -1,7 +1,9 @@
 package app.eightcloud.gallery.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -9,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,6 +36,7 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsScreen(viewModel: GalleryViewModel) {
     val columns by viewModel.columns.collectAsState()
+    val trashItems by viewModel.trashItems.collectAsState()
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
@@ -78,6 +82,29 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.openTrash() }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Delete,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp)) {
+                Text("Trash", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${trashItems.size} items - kept for 30 days",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
 
             Text("Default sort", style = MaterialTheme.typography.titleMedium)
             sortChoice("Date (newest first)", sortField == SortField.DATE && !sortAscending) {

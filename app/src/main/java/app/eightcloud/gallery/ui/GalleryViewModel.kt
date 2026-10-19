@@ -20,10 +20,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        const val TRASH_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
+    }
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -38,6 +42,62 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun setBucketFilter(bucket: String?) {
         _bucketFilter.value = bucket
         applyView()
+    }
+
+    // Trash: ids mapped to the time they were trashed; kept 30 days (app-level).
+    private val _trashed = MutableStateFlow<Map<Long, Long>>(loadTrash())
+    val trashed: StateFlow<Map<Long, Long>> = _trashed
+
+    private val _trashItems = MutableStateFlow<List<MediaItem>>(emptyList())
+    val trashItems: StateFlow<List<MediaItem>> = _trashItems
+
+    private fun loadTrash(): Map<Long, Long> =
+        (prefs.getStringSet("trash", emptySet()) ?: emptySet()).mapNotNull {
+            val parts = it.split(':')
+            if (parts.size == 2) {
+                val id = parts[0].toLongOrNull()
+                val ts = parts[1].toLongOrNull()
+                if (id != null && ts != null) id to ts else null
+            } else null
+        }.toMap()
+
+    private fun saveTrash() {
+        prefs.edit()
+            .putStringSet("trash", _trashed.value.map { "${it.key}:${it.value}" }.toSet())
+            .apply()
+    }
+
+    fun trashSelection() {
+        val now = System.currentTimeMillis()
+        val sel = _selection.value
+        if (sel.isEmpty()) return
+        _trashed.value = _trashed.value + sel.associateWith { now }
+        saveTrash()
+        clearSelection()
+        refreshTrashItems()
+        applyView()
+    }
+
+    fun restoreFromTrash(ids: Set<Long>) {
+        _trashed.value = _trashed.value - ids
+        saveTrash()
+        refreshTrashItems()
+        applyView()
+    }
+
+    fun removeFromTrashRecords(ids: Set<Long>) {
+        _trashed.value = _trashed.value - ids
+        saveTrash()
+        refreshTrashItems()
+    }
+
+    fun isTrashExpired(id: Long): Boolean {
+        val ts = _trashed.value[id] ?: return false
+        return System.currentTimeMillis() - ts > TRASH_RETENTION_MS
+    }
+
+    private fun refreshTrashItems() {
+        _trashItems.value = allItems.filter { _trashed.value.containsKey(it.id) }
     }
 
     private val _items = MutableStateFlow<List<MediaItem>>(emptyList())
@@ -119,6 +179,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             allItems = result
             _bucketCounts.value = result.groupingBy { it.bucket.ifBlank { "Other" } }.eachCount()
+            refreshTrashItems()
             applyView()
             refreshBackupStatus()
             _loading.value = false
@@ -167,6 +228,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun openSettings() { _screen.value = Screen.SETTINGS }
     fun openAlbums() { _screen.value = Screen.ALBUMS }
+    fun openTrash() { _screen.value = Screen.TRASH }
 
     fun openBackup() { _screen.value = Screen.BACKUP }
 
@@ -221,13 +283,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val query = _searchQuery.value.trim()
         val statusFilter = _statusFilter.value
         val bucketFilter = _bucketFilter.value
+        val trashed = _trashed.value
         val field = _sortField.value
         val ascending = _sortAscending.value
         val statusMap = _statusById.value
         val source = allItems
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
-                var view = source
+                val base = if (trashed.isEmpty()) source else source.filter { !trashed.containsKey(it.id) }
+                var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
                 if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
                 if (videosOnly) view = view.filter { it.isVideo }
@@ -256,14 +320,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 val sorted = view.sortedWith(MediaSort.comparator(field, ascending))
+                val active = base
                 val counts = mapOf(
-                    StatusFilter.ALL to source.size,
-                    StatusFilter.BACKED_UP to source.count { statusMap[it.id] == BackupEntry.BACKED_UP },
-                    StatusFilter.PENDING to source.count {
+                    StatusFilter.ALL to active.size,
+                    StatusFilter.BACKED_UP to active.count { statusMap[it.id] == BackupEntry.BACKED_UP },
+                    StatusFilter.PENDING to active.count {
                         statusMap[it.id] != BackupEntry.BACKED_UP &&
                             statusMap[it.id] != BackupEntry.CLOUD_ONLY
                     },
-                    StatusFilter.CLOUD_ONLY to source.count { statusMap[it.id] == BackupEntry.CLOUD_ONLY }
+                    StatusFilter.CLOUD_ONLY to active.count { statusMap[it.id] == BackupEntry.CLOUD_ONLY }
                 )
                 sorted to counts
             }
