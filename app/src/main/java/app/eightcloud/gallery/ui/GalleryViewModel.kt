@@ -92,6 +92,8 @@ internal fun matchesSmartAlbum(
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
+        private const val SEMANTIC_MIN = 0.22f
+        private const val SEMANTIC_BAND = 0.05f
         const val TRASH_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
     }
 
@@ -1181,9 +1183,57 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         clearSelection()
     }
 
+    private var semanticJob: kotlinx.coroutines.Job? = null
+    private var semanticScores: Map<Long, Float> = emptyMap()
+    private var semanticFor: String = ""
+    private var textScorer: app.eightcloud.gallery.labels.ClipScorer? = null
+
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
+        semanticJob?.cancel()
+        val q = query.trim()
+        if (q.length < 3) {
+            semanticScores = emptyMap()
+            semanticFor = ""
+            applyView()
+            return
+        }
+        if (q != semanticFor) semanticScores = emptyMap()
         applyView()
+        semanticJob = viewModelScope.launch(Dispatchers.Default) {
+            kotlinx.coroutines.delay(450)
+            val scores = runCatching { semanticSearch(q) }.getOrDefault(emptyMap())
+            if (_searchQuery.value.trim() == q) {
+                semanticScores = scores
+                semanticFor = q
+                applyView()
+            }
+        }
+    }
+
+    /** Free-text photo search: cosine between the CLIP text embedding and stored image embeddings. */
+    private suspend fun semanticSearch(q: String): Map<Long, Float> = withContext(Dispatchers.Default) {
+        val scorer = textScorer ?: app.eightcloud.gallery.labels.ClipScorer(getApplication())
+            .also { textScorer = it }
+        val qe = scorer.embedText("a photo of $q") ?: return@withContext emptyMap()
+        val dao = app.eightcloud.gallery.backup.BackupDb.get(getApplication()).clipDao()
+        val all = ArrayList<Pair<Long, Float>>()
+        var after = Long.MIN_VALUE
+        while (true) {
+            val page = dao.page(after, 1000)
+            if (page.isEmpty()) break
+            after = page.last().mediaStoreId
+            for (row in page) {
+                val s = app.eightcloud.gallery.labels.ClipPrompts.dot(
+                    qe, app.eightcloud.gallery.labels.ClipPrompts.fromBlob(row.embedding)
+                )
+                if (s >= SEMANTIC_MIN) all += row.mediaStoreId to s
+            }
+        }
+        if (all.isEmpty()) return@withContext emptyMap()
+        val best = all.maxOf { it.second }
+        val cut = maxOf(SEMANTIC_MIN, best - SEMANTIC_BAND)
+        all.filter { it.second >= cut }.sortedByDescending { it.second }.take(500).toMap()
     }
 
     fun toggleVideosOnly() {
@@ -1221,6 +1271,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             _memories.value.filter { !isSensitiveItem(it, labelSnapshot, overrideSnapshot) }
         } else _memories.value
         val source = allItems
+        val semantic = if (query.length >= 3 && semanticFor == query) semanticScores else emptyMap()
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 var base = if (trashed.isEmpty()) source else source.filter { !trashed.containsKey(it.id) }
@@ -1237,7 +1288,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 if (videosOnly) view = view.filter { it.isVideo }
                 if (query.isNotEmpty()) {
                     view = view.filter { item ->
-                        item.name.contains(query, ignoreCase = true) ||
+                        semantic.containsKey(item.id) ||
+                            item.name.contains(query, ignoreCase = true) ||
                             runCatching {
                                 val day = java.time.Instant.ofEpochMilli(item.dateMillis)
                                     .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
@@ -1259,8 +1311,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 }
-                val sorted = view.sortedWith(MediaSort.comparator(field, ascending))
-                var entries = buildEntries(sorted, field)
+                val sorted = if (semantic.isNotEmpty() && query.isNotEmpty()) {
+                    view.sortedByDescending { semantic[it.id] ?: 1f }
+                } else view.sortedWith(MediaSort.comparator(field, ascending))
+                var entries = if (semantic.isNotEmpty() && query.isNotEmpty()) {
+                    sorted.map { GridEntry.Media(it) }
+                } else buildEntries(sorted, field)
                 val unfiltered = bucketFilter == null && smart == null && query.isEmpty() &&
                     statusFilter == StatusFilter.ALL && !favoritesOnly && !videosOnly
                 if (field == SortField.DATE && unfiltered && memoriesEnabled && memories.isNotEmpty()) {

@@ -149,7 +149,39 @@ class ClipScorer(private val context: Context) {
             }
     }.getOrNull()
 
+    private val textSession: OrtSession by lazy {
+        val target = File(context.filesDir, "clip_text_v1.onnx")
+        if (!target.exists() || target.length() < 1_000_000L) {
+            val tmp = File(context.filesDir, "clip_text_v1.tmp")
+            context.assets.open("clip_text.onnx").use { input ->
+                tmp.outputStream().use { out -> input.copyTo(out) }
+            }
+            tmp.renameTo(target)
+        }
+        env.createSession(
+            target.absolutePath,
+            OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) }
+        )
+    }
+
+    private val tokenizer: ClipTokenizer by lazy { ClipTokenizer.load(context) }
+
+    /** L2-normalized 512-d embedding of a free-text query, or null on failure. */
+    fun embedText(text: String): FloatArray? = runCatching {
+        val ids = tokenizer.encode(text)
+        OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong()))
+            .use { tensor ->
+                textSession.run(mapOf("input_ids" to tensor)).use { result ->
+                    val fb = (result[0] as OnnxTensor).floatBuffer
+                    val v = FloatArray(ClipPrompts.DIM)
+                    fb.get(v)
+                    ClipPrompts.normalize(v)
+                }
+            }
+    }.getOrNull()
+
     fun close() {
+        runCatching { textSession.close() }
         runCatching { session.close() }
     }
 }
