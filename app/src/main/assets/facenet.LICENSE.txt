@@ -1,0 +1,9 @@
+facenet.tflite
+==============
+Source: shubham0204/FaceRecognition_With_FaceNet_Android
+(https://github.com/shubham0204/FaceRecognition_With_FaceNet_Android),
+distributed under the Apache License 2.0 (model file bundled in that
+repository's assets; Keras weights converted from nyoki-mtl/keras-facenet,
+a Keras port of davidsandberg/facenet which is MIT licensed).
+
+The full Apache 2.0 license text: https://www.apache.org/licenses/LICENSE-2.0

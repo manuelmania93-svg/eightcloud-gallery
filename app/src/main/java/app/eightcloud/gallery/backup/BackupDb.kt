@@ -185,6 +185,82 @@ interface MediaLabelDao {
 }
 
 /** EXIF GPS cache per media item (map view). lat/lon NULL = scanned, no GPS. */
+@Entity(tableName = "persons")
+data class Person(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String?, // user-given, stored locally only, never uploaded
+    val centroid: ByteArray, // 128-d L2-normalized running centroid
+    val faceCount: Int,
+    val coverJpeg: ByteArray?, // small face crop for the people row
+    val createdAt: Long
+)
+
+@Entity(tableName = "face_entities")
+data class FaceEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val mediaStoreId: Long,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val embedding: ByteArray, // 128-d L2-normalized
+    val personId: Long
+)
+
+/** Images already processed by the face grouper (even when no face was found again). */
+@Entity(tableName = "face_scans")
+data class FaceScan(
+    @PrimaryKey val mediaStoreId: Long,
+    val scannedAt: Long
+)
+
+@Dao
+interface PersonDao {
+    @Query("SELECT * FROM persons ORDER BY faceCount DESC")
+    suspend fun all(): List<Person>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(person: Person): Long
+
+    @Query("UPDATE persons SET name = :name WHERE id = :id")
+    suspend fun rename(id: Long, name: String?)
+
+    @Query("UPDATE persons SET centroid = :centroid, faceCount = :faceCount WHERE id = :id")
+    suspend fun updateCluster(id: Long, centroid: ByteArray, faceCount: Int)
+
+    @Query("UPDATE persons SET coverJpeg = :coverJpeg WHERE id = :id AND coverJpeg IS NULL")
+    suspend fun setCoverIfMissing(id: Long, coverJpeg: ByteArray)
+
+    @Query("SELECT COUNT(*) FROM face_entities WHERE personId = :id")
+    suspend fun memberCount(id: Long): Int
+}
+
+@Dao
+interface FaceDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(faces: List<FaceEntity>)
+
+    @Query("SELECT mediaStoreId FROM face_entities WHERE personId = :personId")
+    suspend fun photoIdsForPerson(personId: Long): List<Long>
+
+    @Query("SELECT personId, mediaStoreId FROM face_entities")
+    suspend fun allPersonPhotos(): List<PersonPhoto>
+}
+
+data class PersonPhoto(
+    val personId: Long,
+    val mediaStoreId: Long
+)
+
+@Dao
+interface FaceScanDao {
+    @Query("SELECT mediaStoreId FROM face_scans")
+    suspend fun processedIds(): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(scan: FaceScan)
+}
+
 @Entity(tableName = "geo_entries")
 data class GeoEntry(
     @PrimaryKey val mediaStoreId: Long,
@@ -208,13 +284,16 @@ interface GeoDao {
     suspend fun locatedCount(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class], version = 9, exportSchema = false)
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class, Person::class, FaceEntity::class, FaceScan::class], version = 10, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
     abstract fun mediaLabelDao(): MediaLabelDao
     abstract fun geoDao(): GeoDao
     abstract fun categoryOverrideDao(): CategoryOverrideDao
+    abstract fun personDao(): PersonDao
+    abstract fun faceDao(): FaceDao
+    abstract fun faceScanDao(): FaceScanDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -270,6 +349,36 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS persons (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT, " +
+                        "centroid BLOB NOT NULL, " +
+                        "faceCount INTEGER NOT NULL, " +
+                        "coverJpeg BLOB, " +
+                        "createdAt INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS face_entities (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "mediaStoreId INTEGER NOT NULL, " +
+                        "\`left\` REAL NOT NULL, " +
+                        "\`top\` REAL NOT NULL, " +
+                        "\`right\` REAL NOT NULL, " +
+                        "\`bottom\` REAL NOT NULL, " +
+                        "embedding BLOB NOT NULL, " +
+                        "personId INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS face_scans (" +
+                        "mediaStoreId INTEGER NOT NULL PRIMARY KEY, " +
+                        "scannedAt INTEGER NOT NULL)"
+                )
+            }
+        }
+
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE backup_index ADD COLUMN keyTag TEXT NOT NULL DEFAULT 'ks'")
@@ -301,7 +410,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).build().also { instance = it }
         }
     }
 }

@@ -25,6 +25,9 @@ enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 data class SmartAlbum(val key: String, val title: String, val count: Int)
 
+/** One face cluster shown in the People section. */
+data class PersonAlbum(val id: Long, val title: String, val count: Int, val coverJpeg: ByteArray?)
+
 internal fun monthTitle(yearMonth: String): String = runCatching {
     java.time.YearMonth.parse(yearMonth)
         .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
@@ -39,9 +42,14 @@ internal fun matchesSmartAlbum(
     item: MediaItem,
     key: String,
     labelsById: Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry> = emptyMap(),
-    overrides: Map<Long, Map<String, Boolean>> = emptyMap()
+    overrides: Map<Long, Map<String, Boolean>> = emptyMap(),
+    personPhotos: Map<Long, Set<Long>> = emptyMap()
 ): Boolean {
     val b = item.bucket.lowercase()
+    if (key.startsWith("person:")) {
+        val pid = key.removePrefix("person:").toLongOrNull() ?: return false
+        return personPhotos[pid]?.contains(item.id) == true
+    }
     if (key.startsWith("cat_")) {
         // Manual correction always wins over the scanner.
         overrides[item.id]?.get(key)?.let { excluded -> return !excluded }
@@ -106,6 +114,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun smartTitle(key: String): String = when {
+        key.startsWith("cat_") -> app.eightcloud.gallery.labels.Categories.title(key)
+        key.startsWith("person:") -> {
+            val pid = key.removePrefix("person:").toLongOrNull()
+            _personAlbums.value.firstOrNull { it.id == pid }?.title ?: "Person"
+        }
         key.startsWith("month:") -> monthTitle(key.removePrefix("month:"))
         key == "screenshots" -> "Screenshots"
         key == "videos" -> "Videos"
@@ -503,6 +516,94 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
             }
             _categoryAlbums.value = albums
+        }
+    }
+
+    // ----- People (on-device face grouping) -----
+
+    private val _personAlbums = MutableStateFlow<List<PersonAlbum>>(emptyList())
+    val personAlbums: StateFlow<List<PersonAlbum>> = _personAlbums
+    private val _personPhotoIds = MutableStateFlow<Map<Long, Set<Long>>>(emptyMap())
+    private val _faceScanProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+    val faceScanProgress: StateFlow<Pair<Int, Int>?> = _faceScanProgress
+    private var faceScanJob: kotlinx.coroutines.Job? = null
+
+    private suspend fun refreshPersons() {
+        val db = app.eightcloud.gallery.backup.BackupDb.get(getApplication())
+        val (persons, photos) = withContext(Dispatchers.IO) {
+            db.personDao().all() to db.faceDao().allPersonPhotos()
+        }
+        _personAlbums.value = persons.map {
+            PersonAlbum(it.id, it.name ?: "Person " + it.id, it.faceCount, it.coverJpeg)
+        }
+        _personPhotoIds.value = photos.groupBy({ it.personId }, { it.mediaStoreId })
+            .mapValues { it.value.toSet() }
+    }
+
+    fun renamePerson(id: Long, name: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            app.eightcloud.gallery.backup.BackupDb.get(getApplication())
+                .personDao().rename(id, name?.trim()?.ifBlank { null })
+            refreshPersons()
+            withContext(Dispatchers.Main) { applyView() }
+        }
+    }
+
+    /**
+     * Group faces into persons, incrementally and fully on-device. Images only;
+     * scans items whose label scan found at least one face.
+     */
+    fun scanFaces() {
+        if (faceScanJob?.isActive == true) return
+        if (_featureToggles.value["feat_face_grouping"] == false) return
+        faceScanJob = viewModelScope.launch {
+            val db = app.eightcloud.gallery.backup.BackupDb.get(getApplication())
+            val grouper = app.eightcloud.gallery.labels.FaceGrouper(getApplication())
+            if (_mediaLabels.value.isEmpty()) {
+                _mediaLabels.value = withContext(Dispatchers.IO) {
+                    db.mediaLabelDao().all().associateBy { it.mediaStoreId }
+                }
+            }
+            refreshPersons()
+            while (true) {
+                val labels = _mediaLabels.value
+                val processed = withContext(Dispatchers.IO) {
+                    db.faceScanDao().processedIds().toSet()
+                }
+                val candidates = allItems.filter {
+                    !it.isVideo && (labels[it.id]?.faceCount ?: 0) > 0 && it.id !in processed
+                }
+                if (candidates.isEmpty()) {
+                    // The label scan may still be finding faces; wait for it.
+                    if (labelScanJob?.isActive == true) {
+                        kotlinx.coroutines.delay(3000)
+                        continue
+                    }
+                    break
+                }
+                val total = processed.size + candidates.size
+                _faceScanProgress.value = processed.size to total
+                candidates.take(10).forEach { item ->
+                    val bmp = withContext(Dispatchers.IO) {
+                        grouper.loadBitmap(android.net.Uri.parse(item.uri), 1024)
+                    }
+                    if (bmp != null) {
+                        runCatching { grouper.process(item.id, bmp) }
+                    } else {
+                        withContext(Dispatchers.IO) {
+                            db.faceScanDao().insert(
+                                app.eightcloud.gallery.backup.FaceScan(
+                                    item.id, System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                }
+                refreshPersons()
+            }
+            _faceScanProgress.value = null
+            refreshPersons()
+            applyView()
         }
     }
 
@@ -969,7 +1070,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 if (secure.isNotEmpty()) base = base.filter { it.id !in secure }
                 var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
-                if (smart != null) view = view.filter { matchesSmartAlbum(it, smart, labelSnapshot, overrideSnapshot) }
+                if (smart != null) view = view.filter {
+                    matchesSmartAlbum(it, smart, labelSnapshot, overrideSnapshot, _personPhotoIds.value)
+                }
                 if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
                 if (videosOnly) view = view.filter { it.isVideo }
                 if (query.isNotEmpty()) {

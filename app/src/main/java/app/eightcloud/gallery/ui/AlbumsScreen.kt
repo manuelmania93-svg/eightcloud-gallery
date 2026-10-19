@@ -9,6 +9,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,7 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AlbumsScreen(viewModel: GalleryViewModel) {
     val bucketCounts by viewModel.bucketCounts.collectAsState()
@@ -36,7 +49,16 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
     val showAuto = featureToggles["feat_auto_albums"] != false
     val categoryAlbums by viewModel.categoryAlbums.collectAsState()
     val labelScanProgress by viewModel.labelScanProgress.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.scanLabels() }
+    val personAlbums by viewModel.personAlbums.collectAsState()
+    val faceScanProgress by viewModel.faceScanProgress.collectAsState()
+    val showPeople = featureToggles["feat_face_grouping"] != false
+    var renamingPerson by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<PersonAlbum?>(null)
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.scanLabels()
+        if (showPeople) viewModel.scanFaces()
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Albums") }) }) { innerPadding ->
         LazyColumn(
@@ -64,6 +86,29 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
                     }
                 )
                 HorizontalDivider()
+            }
+            if (showPeople && (personAlbums.isNotEmpty() || faceScanProgress != null)) {
+                item(key = "hdr-people") {
+                    Text(
+                        "People" + faceScanProgress.let { p ->
+                            if (p != null) " (analyzing ${p.first}/${p.second})" else ""
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+                items(personAlbums, key = { "person-" + it.id }) { person ->
+                    PersonRow(
+                        person = person,
+                        onClick = {
+                            viewModel.setSmartFilter("person:" + person.id)
+                            viewModel.backToGrid()
+                        },
+                        onLongClick = { renamingPerson = person }
+                    )
+                    HorizontalDivider()
+                }
             }
             if (showAuto && smartAlbums.isNotEmpty()) {
                 item(key = "hdr-smart") {
@@ -126,6 +171,73 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
                 )
                 HorizontalDivider()
             }
+        }
+    }
+
+    renamingPerson?.let { person ->
+        var name by remember(person.id) { mutableStateOf(if (person.title.startsWith("Person ")) "" else person.title) }
+        AlertDialog(
+            onDismissRequest = { renamingPerson = null },
+            title = { Text("Name this person") },
+            text = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("Name (stored on this device only)") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.renamePerson(person.id, name)
+                    renamingPerson = null
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingPerson = null }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun PersonRow(person: PersonAlbum, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val cover = remember(person.id, person.coverJpeg) {
+            person.coverJpeg?.let {
+                android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
+            }
+        }
+        if (cover != null) {
+            Image(
+                bitmap = cover,
+                contentDescription = person.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Filled.Folder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+        Column(modifier = Modifier.padding(start = 12.dp)) {
+            Text(person.title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                "${person.count} photos",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
