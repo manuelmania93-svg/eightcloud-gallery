@@ -533,8 +533,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val (persons, photos) = withContext(Dispatchers.IO) {
             db.personDao().all() to db.faceDao().allPersonPhotos()
         }
-        _personAlbums.value = persons.map {
-            PersonAlbum(it.id, it.name ?: "Person " + it.id, it.faceCount, it.coverJpeg)
+        val visibleIds = allItems.map { it.id }.toSet() - _secureIds.value - _trashed.value.keys
+        val visiblePhotos = photos.filter { it.mediaStoreId in visibleIds }
+        _personAlbums.value = persons.mapNotNull {
+            val count = visiblePhotos.filter { photo -> photo.personId == it.id }.map { photo -> photo.mediaStoreId }.distinct().size
+            if (count == 0) null else PersonAlbum(it.id, it.name ?: "Person " + it.id, count, it.coverJpeg)
         }
         _personPhotoIds.value = photos.groupBy({ it.personId }, { it.mediaStoreId })
             .mapValues { it.value.toSet() }
@@ -556,7 +559,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun scanFaces() {
         if (faceScanJob?.isActive == true) return
         if (_featureToggles.value["feat_face_grouping"] == false) return
-        faceScanJob = viewModelScope.launch {
+        faceScanJob = viewModelScope.launch(Dispatchers.IO) {
             val db = app.eightcloud.gallery.backup.BackupDb.get(getApplication())
             val grouper = app.eightcloud.gallery.labels.FaceGrouper(getApplication())
             if (_mediaLabels.value.isEmpty()) {
@@ -565,13 +568,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
             refreshPersons()
+            val failed = mutableSetOf<Long>()
+            try {
             while (true) {
+                if (_featureToggles.value["feat_face_grouping"] == false) break
                 val labels = _mediaLabels.value
                 val processed = withContext(Dispatchers.IO) {
                     db.faceScanDao().processedIds().toSet()
                 }
                 val candidates = allItems.filter {
-                    !it.isVideo && (labels[it.id]?.faceCount ?: 0) > 0 && it.id !in processed
+                    !it.isVideo && (labels[it.id]?.faceCount ?: 0) > 0 && it.id !in processed &&
+                        it.id !in failed && it.id !in _secureIds.value && it.id !in _trashed.value
                 }
                 if (candidates.isEmpty()) {
                     // The label scan may still be finding faces; wait for it.
@@ -588,22 +595,27 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         grouper.loadBitmap(android.net.Uri.parse(item.uri), 1024)
                     }
                     if (bmp != null) {
-                        runCatching { grouper.process(item.id, bmp) }
-                    } else {
-                        withContext(Dispatchers.IO) {
-                            db.faceScanDao().insert(
-                                app.eightcloud.gallery.backup.FaceScan(
-                                    item.id, System.currentTimeMillis()
-                                )
-                            )
+                        try {
+                            grouper.process(item.id, bmp)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            failed += item.id
+                        } finally {
+                            bmp.recycle()
                         }
+                    } else {
+                        failed += item.id
                     }
                 }
                 refreshPersons()
             }
-            _faceScanProgress.value = null
             refreshPersons()
-            applyView()
+            withContext(Dispatchers.Main) { applyView() }
+            } finally {
+                grouper.close()
+                _faceScanProgress.value = null
+            }
         }
     }
 
@@ -779,6 +791,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun setFeatureEnabled(key: String, enabled: Boolean) {
         prefs.edit().putBoolean(key, enabled).apply()
         _featureToggles.value = _featureToggles.value + (key to enabled)
+        if (key == "feat_face_grouping") {
+            if (enabled) scanFaces() else faceScanJob?.cancel()
+        }
     }
 
     fun featureEnabled(key: String): Boolean = _featureToggles.value[key] != false

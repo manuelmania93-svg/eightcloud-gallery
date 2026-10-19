@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.net.Uri
+import androidx.room.withTransaction
 import app.eightcloud.gallery.backup.BackupDb
 import app.eightcloud.gallery.backup.FaceEntity
 import app.eightcloud.gallery.backup.FaceScan
@@ -17,14 +18,15 @@ import java.io.ByteArrayOutputStream
 
 /**
  * Groups faces into per-person clusters, fully on-device: ML Kit detection,
- * FaceNet embeddings, greedy nearest-centroid assignment (FaceClusterer math).
+ * SFace embeddings, greedy nearest-centroid assignment (FaceClusterer math).
  * Everything persists in Room only - nothing ever leaves the device.
  */
-class FaceGrouper(private val context: Context) {
+class FaceGrouper(private val context: Context) : AutoCloseable {
 
     private val detector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .build()
     )
     private val embedder = FaceEmbedder(context)
@@ -50,18 +52,23 @@ class FaceGrouper(private val context: Context) {
     suspend fun process(mediaStoreId: Long, bitmap: Bitmap): Int {
         val db = BackupDb.get(context)
         val image = InputImage.fromBitmap(bitmap, 0)
-        val faces = runCatching { detector.process(image).await() }.getOrNull().orEmpty()
+        val faces = detector.process(image).await()
         if (faces.isEmpty()) {
             db.faceScanDao().insert(FaceScan(mediaStoreId, System.currentTimeMillis()))
             return 0
         }
+        return db.withTransaction {
+        if (mediaStoreId in db.faceScanDao().processedIds()) return@withTransaction 0
         val persons = db.personDao().all().toMutableList()
         val centroids = persons.map { FaceClusterer.bytesToFloats(it.centroid) }.toMutableList()
         val entities = mutableListOf<FaceEntity>()
+        val usedPersons = mutableSetOf<Long>()
         for (face in faces) {
             val box = face.boundingBox
-            val emb = embedder.embed(bitmap, box) ?: continue
-            val match = FaceClusterer.bestMatch(emb, centroids)
+            val emb = embedder.embed(bitmap, face) ?: continue
+            val available = persons.indices.filter { persons[it].id !in usedPersons }
+            val nearest = FaceClusterer.bestMatch(emb, available.map { centroids[it] })
+            val match = if (nearest >= 0) available[nearest] else -1
             val personId: Long
             if (match >= 0) {
                 val p = persons[match]
@@ -87,6 +94,7 @@ class FaceGrouper(private val context: Context) {
                 centroids.add(emb)
                 personId = id
             }
+            usedPersons += personId
             entities.add(
                 FaceEntity(
                     mediaStoreId = mediaStoreId,
@@ -100,8 +108,15 @@ class FaceGrouper(private val context: Context) {
             )
         }
         db.faceDao().insertAll(entities)
+        check(entities.isNotEmpty()) { "No usable face landmarks found" }
         db.faceScanDao().insert(FaceScan(mediaStoreId, System.currentTimeMillis()))
-        return entities.size
+        entities.size
+        }
+    }
+
+    override fun close() {
+        detector.close()
+        embedder.close()
     }
 
     private fun coverJpeg(bitmap: Bitmap, box: Rect): ByteArray? = runCatching {

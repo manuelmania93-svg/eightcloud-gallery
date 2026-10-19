@@ -12,11 +12,7 @@ object FaceClusterer {
 
     const val DIM = 128
 
-    /**
-     * Minimum cosine similarity to count a face as the same person.
-     * FaceNet 128-d embeddings: same person typically scores 0.6+, different
-     * people rarely exceed 0.4. False merges are worse than splits, so aim high.
-     */
+    /** Conservative SFace grouping threshold; false splits remain possible. */
     const val SAME_PERSON_COSINE = 0.6f
 
     fun floatsToBytes(f: FloatArray): ByteArray {

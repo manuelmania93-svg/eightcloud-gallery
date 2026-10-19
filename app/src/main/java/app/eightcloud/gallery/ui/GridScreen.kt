@@ -58,7 +58,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.CheckCircle
@@ -123,6 +123,7 @@ internal sealed class GridEntry(val key: String) {
 internal fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEntry> {
     val entries = ArrayList<GridEntry>(items.size + 64)
     var lastLabel: String? = null
+    var currentHeader: GridEntry.Header? = null
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now(zone)
     val dayFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")
@@ -140,10 +141,11 @@ internal fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEn
             SortField.SIZE -> null
         }
         if (label != null && label != lastLabel) {
-            entries.add(GridEntry.Header(label))
+            currentHeader = GridEntry.Header(label)
+            entries.add(currentHeader)
             lastLabel = label
         }
-        if (label != null) (entries.last() as? GridEntry.Header)?.let { it.count++ }
+        if (label != null) currentHeader?.let { it.count++ }
         entries.add(GridEntry.Media(item))
     }
     return entries
@@ -438,7 +440,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
                                 Text(
-                                    text = "${entry.count} items",
+                                    text = "${entry.count} " + if (entry.count == 1) "item" else "items",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -458,7 +460,8 @@ fun GridScreen(viewModel: GalleryViewModel) {
                                         if (index >= 0) viewModel.openViewer(index)
                                     }
                                 },
-                                onLongClick = { viewModel.toggleSelect(entry.item.id) }
+                                onLongClick = { viewModel.toggleSelect(entry.item.id) },
+                                onToggleFavorite = { viewModel.toggleFavorite(entry.item.id) }
                             )
                             is GridEntry.Memories -> MemoriesCard(
                                 memories = entry.items,
@@ -670,6 +673,14 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
                 }
         )
 
+        if (thumbnailFailed && !fastScrolling) {
+            Text(
+                "Preview unavailable",
+                modifier = Modifier.align(Alignment.Center).padding(12.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -772,8 +783,10 @@ private fun MediaThumb(
     isFavorite: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    onToggleFavorite: () -> Unit
 ) {
+    var thumbnailFailed by remember(item.uri) { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .aspectRatio(1f)
@@ -789,6 +802,8 @@ private fun MediaThumb(
                     .build(),
                 contentDescription = item.name,
                 contentScale = ContentScale.Crop,
+                onError = { thumbnailFailed = true },
+                onSuccess = { thumbnailFailed = false },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -804,7 +819,7 @@ private fun MediaThumb(
                 BackupEntry.BACKED_UP -> Triple(Icons.Filled.CloudDone, Color(0xFF2E86D4), "Backed up")
                 BackupEntry.CLOUD_ONLY -> Triple(Icons.Filled.CloudDownload, Color(0xFF41719E), "Cloud only")
                 BackupEntry.MISSING_IN_CLOUD -> Triple(Icons.Filled.Warning, Color(0xFFE2A455), "Missing in cloud")
-                else -> Triple(Icons.Filled.Phone, Color(0xFF8AA0B4), "Local only")
+                else -> Triple(Icons.Filled.Smartphone, Color(0xFF8AA0B4), "Local only")
             }
             Icon(
                 imageVector = badgeIcon,
@@ -841,15 +856,15 @@ private fun MediaThumb(
                     .padding(horizontal = 5.dp, vertical = 1.dp)
             )
         }
-        if (isFavorite) {
+        IconButton(
+            onClick = onToggleFavorite,
+            modifier = Modifier.align(Alignment.TopStart).size(40.dp)
+        ) {
             Icon(
-                imageVector = Icons.Filled.Favorite,
-                contentDescription = "Favorite",
-                tint = Color(0xFFE2557A),
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp)
-                    .size(18.dp)
+                imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                contentDescription = if (isFavorite) "Remove favorite" else "Add favorite",
+                tint = if (isFavorite) Color(0xFFFF608A) else Color.White,
+                modifier = Modifier.background(Color(0x99000000), CircleShape).padding(4.dp).size(20.dp)
             )
         }
         if (item.isVideo) {
@@ -870,7 +885,7 @@ private fun MediaThumb(
                         modifier = Modifier.size(12.dp)
                     )
                     Text(
-                        text = DetailsLoader.formatDuration(item.durationMs),
+                        text = if (item.durationMs > 0) DetailsLoader.formatDuration(item.durationMs) else "Video",
                         color = Color.White,
                         style = MaterialTheme.typography.labelSmall
                     )

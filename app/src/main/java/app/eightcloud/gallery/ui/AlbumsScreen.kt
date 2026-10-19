@@ -55,7 +55,7 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
     var renamingPerson by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf<PersonAlbum?>(null)
     }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    androidx.compose.runtime.LaunchedEffect(showPeople) {
         viewModel.scanLabels()
         if (showPeople) viewModel.scanFaces()
     }

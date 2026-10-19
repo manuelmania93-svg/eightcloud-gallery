@@ -1,0 +1,6 @@
+OpenCV SFace, contributed by Yaoyao Zhong; ONNX conversion credited to Chengrui Wang.
+Model source: https://huggingface.co/opencv/face_recognition_sface
+Revision: 3d7082438a6e4551e840c9b2bb60b71e8da4b524
+File: face_recognition_sface_2021dec.onnx (unmodified, renamed sface.onnx)
+The model-specific README states all files in its directory are Apache-2.0 licensed.
+Full license is included as sface.LICENSE.txt.

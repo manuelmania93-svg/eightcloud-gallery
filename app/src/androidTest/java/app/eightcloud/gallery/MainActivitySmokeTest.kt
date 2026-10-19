@@ -168,6 +168,35 @@ class MainActivitySmokeTest {
         }
     }
 
+    @Test
+    fun tileHeartTogglesFavoriteAndCapturesGrid() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val uri = insertTestImage("HeartTest.png", System.currentTimeMillis())
+        try {
+            composeRule.activityRule.scenario.onActivity { activity ->
+                val vm = ViewModelProvider(activity)[GalleryViewModel::class.java]
+                vm.setPrivacyScreen(false)
+                vm.loadMedia()
+            }
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithContentDescription("Add favorite").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("Add favorite").performClick()
+            composeRule.onNodeWithContentDescription("Remove favorite").assertIsDisplayed()
+            val dir = java.io.File(context.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation
+                .takeScreenshot().also { bitmap ->
+                    java.io.File(dir, "favorite-grid.png").outputStream().use {
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                }
+            composeRule.onNodeWithContentDescription("Remove favorite").performClick()
+            composeRule.onNodeWithContentDescription("Add favorite").assertIsDisplayed()
+        } finally {
+            context.contentResolver.delete(uri, null, null)
+        }
+    }
+
     private fun insertTestImage(displayName: String, dateTakenMs: Long): Uri {
         val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
         val values = ContentValues().apply {
