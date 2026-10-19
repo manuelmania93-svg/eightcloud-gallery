@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
@@ -129,7 +130,7 @@ fun EightCloudApp() {
                     bottomBar = {
                         if (screen != Screen.VIEWER) {
                             androidx.compose.material3.NavigationBar {
-                                androidx.compose.material3.NavigationBarItem(
+                                NavigationBarItem(
                                     selected = screen == Screen.GRID,
                                     onClick = { viewModel.backToGrid() },
                                     icon = {
@@ -140,7 +141,7 @@ fun EightCloudApp() {
                                     },
                                     label = { Text("Photos") }
                                 )
-                                androidx.compose.material3.NavigationBarItem(
+                                NavigationBarItem(
                                     selected = screen == Screen.ALBUMS,
                                     onClick = { viewModel.openAlbums() },
                                     icon = {
@@ -151,7 +152,7 @@ fun EightCloudApp() {
                                     },
                                     label = { Text("Albums") }
                                 )
-                                androidx.compose.material3.NavigationBarItem(
+                                NavigationBarItem(
                                     selected = screen == Screen.BACKUP,
                                     onClick = { viewModel.openBackup() },
                                     icon = {
@@ -162,7 +163,7 @@ fun EightCloudApp() {
                                     },
                                     label = { Text("Cloud") }
                                 )
-                                androidx.compose.material3.NavigationBarItem(
+                                NavigationBarItem(
                                     selected = screen == Screen.SETTINGS,
                                     onClick = { viewModel.openSettings() },
                                     icon = {
