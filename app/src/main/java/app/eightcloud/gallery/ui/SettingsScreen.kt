@@ -354,7 +354,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
         )
-        FEATURE_TOGGLES.forEach { toggle ->
+        FEATURE_TOGGLES.filter { it.available }.forEach { toggle ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
