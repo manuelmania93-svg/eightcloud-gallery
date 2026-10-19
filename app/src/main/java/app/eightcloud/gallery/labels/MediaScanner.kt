@@ -25,6 +25,8 @@ class MediaScanner(private val context: Context) {
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
             .build()
     )
+    private val nsfwScorer by lazy { NsfwScorer(context) }
+
     private val labeler = ImageLabeling.getClient(
         ImageLabelerOptions.Builder()
             .setConfidenceThreshold(0.6f)
@@ -37,11 +39,12 @@ class MediaScanner(private val context: Context) {
         val image = InputImage.fromBitmap(bitmap, 0)
         val faces = runCatching { faceDetector.process(image).await() }.getOrNull()
         val labels = runCatching { labeler.process(image).await() }.getOrNull()
+        val nsfw = nsfwScorer.score(bitmap)
         val entry = MediaLabelEntry(
             mediaStoreId = mediaStoreId,
             faceCount = faces?.size ?: 0,
             labels = labels?.joinToString(",") { it.text } ?: "",
-            nsfwScore = -1f,
+            nsfwScore = nsfw,
             scannedAt = System.currentTimeMillis()
         )
         BackupDb.get(context).mediaLabelDao().upsert(entry)
