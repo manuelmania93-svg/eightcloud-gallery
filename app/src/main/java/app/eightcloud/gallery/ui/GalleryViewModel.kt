@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
@@ -78,6 +78,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         applyView()
     }
 
+    fun trashIds(ids: Set<Long>) {
+        val now = System.currentTimeMillis()
+        _trashed.value = _trashed.value + ids.associateWith { now }
+        saveTrash()
+        clearSelection()
+        refreshTrashItems()
+        applyView()
+        computeDuplicates()
+    }
+
     fun restoreFromTrash(ids: Set<Long>) {
         _trashed.value = _trashed.value - ids
         saveTrash()
@@ -98,6 +108,26 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private fun refreshTrashItems() {
         _trashItems.value = allItems.filter { _trashed.value.containsKey(it.id) }
+    }
+
+    // Duplicates: same byte size + same dimensions, no hashing needed.
+    private val _duplicateGroups = MutableStateFlow<List<List<MediaItem>>>(emptyList())
+    val duplicateGroups: StateFlow<List<List<MediaItem>>> = _duplicateGroups
+
+    private fun computeDuplicates() {
+        val source = allItems
+        val trashed = _trashed.value
+        viewModelScope.launch {
+            val groups = withContext(Dispatchers.Default) {
+                source
+                    .filter { it.sizeBytes > 0 && !trashed.containsKey(it.id) }
+                    .groupBy { "${it.sizeBytes}:${it.width}x${it.height}" }
+                    .values
+                    .filter { it.size > 1 }
+                    .sortedByDescending { it.size }
+            }
+            _duplicateGroups.value = groups
+        }
     }
 
     private val _items = MutableStateFlow<List<MediaItem>>(emptyList())
@@ -180,6 +210,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             allItems = result
             _bucketCounts.value = result.groupingBy { it.bucket.ifBlank { "Other" } }.eachCount()
             refreshTrashItems()
+            computeDuplicates()
             applyView()
             refreshBackupStatus()
             _loading.value = false
@@ -229,6 +260,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun openSettings() { _screen.value = Screen.SETTINGS }
     fun openAlbums() { _screen.value = Screen.ALBUMS }
     fun openTrash() { _screen.value = Screen.TRASH }
+    fun openDuplicates() { _screen.value = Screen.DUPLICATES }
 
     fun openBackup() { _screen.value = Screen.BACKUP }
 

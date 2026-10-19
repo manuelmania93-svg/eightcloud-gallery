@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -37,6 +38,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(viewModel: GalleryViewModel) {
     val columns by viewModel.columns.collectAsState()
     val trashItems by viewModel.trashItems.collectAsState()
+    val duplicateGroups by viewModel.duplicateGroups.collectAsState()
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
@@ -100,6 +102,29 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
                 Text("Trash", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "${trashItems.size} items - kept for 30 days",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.openDuplicates() }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.ContentCopy,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp)) {
+                Text("Duplicates", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${duplicateGroups.size} groups - same size and dimensions",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
