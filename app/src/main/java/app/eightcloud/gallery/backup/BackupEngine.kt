@@ -54,6 +54,11 @@ class BackupEngine(private val context: Context) {
     /** One upload chunk stays well under the 2 GB Telegram document limit. */
     private val chunkSizeBytes = 1_500_000_000L
 
+    companion object {
+        // Official free-account per-file cap (telegram.org/faq).
+        const val TELEGRAM_FREE_MAX_BYTES = 2_000_000_000L
+    }
+
     /**
      * Adds files that are new to the index as PENDING. Returns the new count.
      * When [onlyIds] is given (manual targeted run), the folder-scope setting
@@ -159,77 +164,110 @@ class BackupEngine(private val context: Context) {
 
     private suspend fun uploadOne(entry: BackupEntry, chatId: Long, threadId: Long? = null) {
         db.dao().setStatus(entry.contentHash, BackupEntry.UPLOADING)
+        val splitEnabled = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getBoolean("splitLargeFiles", true)
+        if (!splitEnabled && entry.sizeBytes > TELEGRAM_FREE_MAX_BYTES) {
+            throw TdException(0, "over Telegram's 2 GB limit and splitting is off in Settings")
+        }
         val uri = uriFor(entry)
         val key = KeystoreKeys.backupKey()
         val iv = BackupCrypto.randomIv()
-        val encrypted = File(chunkDir, entry.contentHash.take(16) + ".enc")
+        val base = entry.contentHash.take(16)
+        // Single pass: encrypt straight into rotating part files, so the temp
+        // footprint is ~1x the file size instead of ~2x (no full-size .enc
+        // plus a second set of split parts). Splitting only kicks in above
+        // chunkSizeBytes; smaller files land in a single part like before.
+        val partFiles = mutableListOf<File>()
         try {
+            val sink = RotatingPartOutputStream(chunkDir, base, chunkSizeBytes, partFiles)
             context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(encrypted).use { output ->
-                    BackupCrypto.encryptStream(key, iv, input, output)
-                }
+                sink.use { out -> BackupCrypto.encryptStream(key, iv, input, out) }
             } ?: throw TdException(0, "cannot read local file")
-            uploadChunks(chatId, encrypted, entry, listOf(iv), threadId)
+            uploadParts(chatId, partFiles, sink.checksums, entry, iv, threadId)
         } finally {
-            encrypted.delete()
+            partFiles.forEach { it.delete() }
         }
     }
 
-    private suspend fun uploadChunks(chatId: Long, encrypted: File, entry: BackupEntry, ivs: List<ByteArray>, threadId: Long? = null) {
-        val size = encrypted.length()
-        val messageIds = mutableListOf<Long>()
+    private suspend fun uploadParts(
+        chatId: Long,
+        parts: List<File>,
+        checksums: List<String>,
+        entry: BackupEntry,
+        iv: ByteArray,
+        threadId: Long? = null
+    ) {
         val captionBase = entry.contentHash.take(12) + " " + entry.name
-        if (size <= chunkSizeBytes) {
-            val msg = td.uploadDocument(chatId, encrypted.absolutePath, captionBase, threadId)
-            messageIds.add(msg.id)
-        } else {
-            val parts = splitFile(encrypted, chunkSizeBytes)
-            try {
-                parts.forEachIndexed { i, part ->
-                    val msg = td.uploadDocument(chatId, part.absolutePath, "$captionBase [part ${i + 1}/${parts.size}]", threadId)
-                    messageIds.add(msg.id)
-                }
-            } finally {
-                parts.forEach { it.delete() }
-            }
+        val messageIds = parts.mapIndexed { i, part ->
+            val caption = if (parts.size == 1) captionBase
+                else "$captionBase [part ${i + 1}/${parts.size}]"
+            td.uploadDocument(chatId, part.absolutePath, caption, threadId).id
         }
-        val ivHex = ivs.joinToString(",") { Base64.encodeToString(it, Base64.NO_WRAP) }
-        db.dao().markUploaded(
+        db.dao().markUploadedWithChecksums(
             entry.contentHash,
             BackupEntry.BACKED_UP,
             messageIds.joinToString(","),
-            ivHex,
+            Base64.encodeToString(iv, Base64.NO_WRAP),
+            checksums.joinToString(","),
             System.currentTimeMillis()
         )
     }
 
-    private fun splitFile(file: File, partSize: Long): List<File> {
-        val parts = mutableListOf<File>()
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(8 * 1024 * 1024)
-            var partIndex = 0
-            var currentOut: FileOutputStream? = null
-            var currentSize = 0L
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                if (currentOut == null) {
-                    val part = File(chunkDir, "${file.nameWithoutExtension}.part$partIndex")
-                    parts.add(part)
-                    currentOut = FileOutputStream(part)
-                    currentSize = 0
-                }
-                currentOut!!.write(buffer, 0, read)
-                currentSize += read
-                if (currentSize >= partSize) {
-                    currentOut.close()
-                    currentOut = null
-                    partIndex++
-                }
-            }
-            currentOut?.close()
+    /**
+     * OutputStream that rotates to a new part file once the current one
+     * reaches partSize, computing a SHA-256 per part. Encryption streams
+     * through it transparently, so parts are slices of one ciphertext.
+     */
+    private class RotatingPartOutputStream(
+        private val dir: File,
+        private val base: String,
+        private val partSize: Long,
+        private val partFiles: MutableList<File>
+    ) : java.io.OutputStream() {
+        val checksums = mutableListOf<String>()
+        private var out: FileOutputStream? = null
+        private var digest: java.security.MessageDigest? = null
+        private var size = 0L
+        private var index = 0
+
+        private fun openNext() {
+            val f = File(dir, "$base.part$index")
+            index++
+            partFiles.add(f)
+            out = FileOutputStream(f)
+            digest = java.security.MessageDigest.getInstance("SHA-256")
+            size = 0L
         }
-        return parts
+
+        private fun closeCurrent() {
+            out?.close()
+            out = null
+            digest?.let { d -> checksums.add(d.digest().joinToString("") { "%02x".format(it) }) }
+            digest = null
+        }
+
+        override fun write(b: Int) {
+            write(byteArrayOf(b.toByte()), 0, 1)
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            var remaining = len
+            var offset = off
+            while (remaining > 0) {
+                if (out == null) openNext()
+                val n = minOf(remaining.toLong(), partSize - size).toInt()
+                out!!.write(b, offset, n)
+                digest!!.update(b, offset, n)
+                size += n
+                offset += n
+                remaining -= n
+                if (size >= partSize) closeCurrent()
+            }
+        }
+
+        override fun close() {
+            closeCurrent()
+        }
     }
 
     /** Exports the whole index, encrypted, as the latest index document in Saved Messages. */
@@ -246,6 +284,7 @@ class BackupEngine(private val context: Context) {
                 put("status", e.status)
                 put("messageIds", e.telegramMessageIds)
                 put("ivs", e.chunkIvs)
+                put("partChecksums", e.partChecksums)
                 put("uploadedAt", e.uploadedAt)
             })
         }
@@ -313,6 +352,7 @@ class BackupEngine(private val context: Context) {
                     status = BackupEntry.CLOUD_ONLY,
                     telegramMessageIds = o.getString("messageIds"),
                     chunkIvs = o.getString("ivs"),
+                    partChecksums = o.optString("partChecksums", ""),
                     uploadedAt = o.getLong("uploadedAt"),
                     lastSeenAt = now
                 )
@@ -398,6 +438,16 @@ class BackupEngine(private val context: Context) {
             val doc = (msg.content as? TdApi.MessageDocument)?.document
                 ?: throw IllegalStateException("message ${msg.id} is not a document")
             td.downloadFile(doc.document.id)
+        }
+        // Verify part checksums recorded at upload time (older entries have none).
+        val checksums = entry.partChecksums.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        parts.forEachIndexed { i, path ->
+            if (i < checksums.size) {
+                val actual = FileInputStream(File(path)).use { Hasher.sha256Hex(it) }
+                if (!actual.equals(checksums[i], ignoreCase = true)) {
+                    throw IllegalStateException("checksum mismatch on part ${i + 1}")
+                }
+            }
         }
         val ivHex = entry.chunkIvs.split(',').first().trim()
         val iv = ivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()

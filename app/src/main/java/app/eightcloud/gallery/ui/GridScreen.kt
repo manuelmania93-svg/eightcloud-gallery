@@ -172,6 +172,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
     }
     val favorites by viewModel.favorites.collectAsState()
     val statusById by viewModel.statusById.collectAsState()
+    val splitIds by viewModel.splitIds.collectAsState()
     val bucketFilter by viewModel.bucketFilter.collectAsState()
     val smartFilter by viewModel.smartFilter.collectAsState()
 
@@ -399,6 +400,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
                             is GridEntry.Media -> MediaThumb(
                                 item = entry.item,
                                 fastScrolling = sliderDragging,
+                                isSplit = splitIds.contains(entry.item.id),
                                 status = statusById[entry.item.id],
                                 isFavorite = favorites.contains(entry.item.id),
                                 isSelected = selection.contains(entry.item.id),
@@ -717,6 +719,7 @@ private fun MemoriesCard(memories: List<MediaItem>, onOpen: (MediaItem) -> Unit)
 private fun MediaThumb(
     item: MediaItem,
     fastScrolling: Boolean,
+    isSplit: Boolean,
     status: String?,
     isFavorite: Boolean,
     isSelected: Boolean,
@@ -776,6 +779,18 @@ private fun MediaThumb(
                     .align(Alignment.BottomStart)
                     .padding(5.dp)
                     .size(22.dp)
+            )
+        }
+        if (isSplit) {
+            Text(
+                "Split",
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(5.dp)
+                    .background(Color(0x99000000), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
             )
         }
         if (isFavorite) {

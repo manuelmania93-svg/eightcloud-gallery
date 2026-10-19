@@ -29,7 +29,8 @@ data class BackupEntry(
     val chunkIvs: String, // comma-separated hex ivs, one per chunk
     val uploadedAt: Long,
     val lastSeenAt: Long,
-    val errorMessage: String = ""
+    val errorMessage: String = "",
+    val partChecksums: String = "" // comma-separated SHA-256 hex, one per part
 ) {
     companion object {
         const val PENDING = "PENDING"
@@ -73,6 +74,9 @@ interface BackupDao {
     @Query("UPDATE backup_index SET status = 'FAILED', errorMessage = :message WHERE contentHash = :hash")
     suspend fun markFailed(hash: String, message: String)
 
+    @Query("UPDATE backup_index SET status = :status, telegramMessageIds = :messageIds, chunkIvs = :ivs, partChecksums = :checksums, uploadedAt = :uploadedAt WHERE contentHash = :hash")
+    suspend fun markUploadedWithChecksums(hash: String, status: String, messageIds: String, ivs: String, checksums: String, uploadedAt: Long)
+
     @Query("UPDATE backup_index SET status = 'PENDING', errorMessage = '' WHERE status = 'FAILED'")
     suspend fun resetFailed(): Int
 
@@ -80,7 +84,7 @@ interface BackupDao {
     suspend fun pendingByIds(ids: List<Long>): List<BackupEntry>
 }
 
-@Database(entities = [BackupEntry::class], version = 2, exportSchema = false)
+@Database(entities = [BackupEntry::class], version = 3, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
 
@@ -88,6 +92,11 @@ abstract class BackupDb : RoomDatabase() {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE backup_index ADD COLUMN errorMessage TEXT NOT NULL DEFAULT ''")
+            }
+        }
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE backup_index ADD COLUMN partChecksums TEXT NOT NULL DEFAULT ''")
             }
         }
 
@@ -98,7 +107,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
     }
 }

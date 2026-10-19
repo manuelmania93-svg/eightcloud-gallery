@@ -277,12 +277,27 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _statusById = MutableStateFlow<Map<Long, String>>(emptyMap())
     val statusById: StateFlow<Map<Long, String>> = _statusById
 
+    // MediaStore ids whose backup is stored as multiple Telegram messages.
+    private val _splitIds = MutableStateFlow<Set<Long>>(emptySet())
+    val splitIds: StateFlow<Set<Long>> = _splitIds
+
+    private val _splitLargeFiles = MutableStateFlow(prefs.getBoolean("splitLargeFiles", true))
+    val splitLargeFiles: StateFlow<Boolean> = _splitLargeFiles
+
+    fun setSplitLargeFiles(on: Boolean) {
+        _splitLargeFiles.value = on
+        prefs.edit().putBoolean("splitLargeFiles", on).apply()
+    }
+
     fun refreshBackupStatus() {
         viewModelScope.launch {
-            val map = withContext(Dispatchers.IO) {
-                BackupDb.get(getApplication()).dao().all()
-                    .associate { it.mediaStoreId to it.status }
+            val (map, splits) = withContext(Dispatchers.IO) {
+                val all = BackupDb.get(getApplication()).dao().all()
+                all.associate { it.mediaStoreId to it.status } to
+                    all.filter { it.telegramMessageIds.contains(",") }
+                        .map { it.mediaStoreId }.toSet()
             }
+            _splitIds.value = splits
             _statusById.value = map
             applyView()
         }

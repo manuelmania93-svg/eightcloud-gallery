@@ -56,6 +56,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val slideshowSpeedSec by viewModel.slideshowSpeedSec.collectAsState()
     val slideshowLoop by viewModel.slideshowLoop.collectAsState()
     val slideshowMusicUri by viewModel.slideshowMusicUri.collectAsState()
+    val splitLargeFiles by viewModel.splitLargeFiles.collectAsState()
 
     BackHandler { viewModel.backToGrid() }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -310,6 +311,26 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
                     )
                 }
             }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Split files over 2 GB", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Big videos upload in parts - Telegram's free limit is 2 GB per file",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = splitLargeFiles,
+                onCheckedChange = { viewModel.setSplitLargeFiles(it) }
+            )
         }
 
         Text(
