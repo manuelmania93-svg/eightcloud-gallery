@@ -61,6 +61,14 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         Coil.setImageLoader(
             ImageLoader.Builder(this)
                 .components { add(VideoFrameDecoder.Factory()) }
+                // Cap the bitmap memory cache: with 40k+ items, aggressive
+                // caching plus video frame decodes can OOM during fast
+                // scrolling.
+                .memoryCache {
+                    coil.memory.MemoryCache.Builder(this)
+                        .maxSizePercent(0.20)
+                        .build()
+                }
                 .build()
         )
         setContent {

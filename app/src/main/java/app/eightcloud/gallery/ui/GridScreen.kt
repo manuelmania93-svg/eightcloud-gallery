@@ -559,6 +559,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
                 .width(32.dp)
+                .testTag("fastScrollStrip")
                 .pointerInput(total, trackHeightPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)

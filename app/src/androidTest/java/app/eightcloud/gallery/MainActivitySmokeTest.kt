@@ -181,4 +181,38 @@ class MainActivitySmokeTest {
         composeRule.onNodeWithTag("mediaGrid").performScrollToIndex(41_000)
         composeRule.waitForIdle()
     }
+
+    @Test
+    fun sliderDragAcross41kItemsDoesNotCrash() {
+        val vm = ViewModelProvider(composeRule.activity)[GalleryViewModel::class.java]
+        composeRule.waitUntil(timeoutMillis = 20000) { !vm.loading.value }
+        composeRule.runOnIdle { vm.loadSyntheticForTest(41_052) }
+        composeRule.waitUntil(timeoutMillis = 20000) { vm.items.value.size == 41_052 }
+        val strip = composeRule.onNodeWithTag("fastScrollStrip")
+        strip.assertIsDisplayed()
+        // Scrub the whole library like a user dragging the slider: any
+        // exception in the drag -> scrollToItem -> relayout path fails here.
+        strip.performTouchInput {
+            down(centerRight.copy(y = top + 10))
+            var y = top + 10
+            while (y < bottom - 10) {
+                y += 120
+                moveTo(centerRight.copy(y = y.coerceAtMost(bottom - 10)), delayMillis = 16)
+            }
+            up()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("mediaGrid").assertIsDisplayed()
+        strip.performTouchInput {
+            down(centerRight.copy(y = bottom - 10))
+            var y = bottom - 10
+            while (y > top + 10) {
+                y -= 240
+                moveTo(centerRight.copy(y = y.coerceAtLeast(top + 10)), delayMillis = 16)
+            }
+            up()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("mediaGrid").assertIsDisplayed()
+    }
 }

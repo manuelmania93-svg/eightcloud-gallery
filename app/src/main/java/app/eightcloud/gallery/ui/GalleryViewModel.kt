@@ -137,7 +137,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     // thread in applyView; building 40k+ entries during composition froze
     // the UI on large libraries.
     private val _entries = MutableStateFlow<List<GridEntry>>(emptyList())
-    val entries: StateFlow<List<GridEntry>> = _entries
+    internal val entries: StateFlow<List<GridEntry>> = _entries
 
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading
