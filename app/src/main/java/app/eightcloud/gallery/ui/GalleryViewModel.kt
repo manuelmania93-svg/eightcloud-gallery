@@ -30,17 +30,27 @@ internal fun monthTitle(yearMonth: String): String = runCatching {
         .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
 }.getOrDefault(yearMonth)
 
+/** Confs for matching; legacy rows (no confs stored) get a neutral 0.70 per label. */
+internal fun confsOf(entry: app.eightcloud.gallery.backup.MediaLabelEntry): String =
+    if (entry.labelConfs.isNotBlank()) entry.labelConfs
+    else entry.labels.split(",").filter { it.isNotBlank() }.joinToString(",") { "$it:0.70" }
+
 internal fun matchesSmartAlbum(
     item: MediaItem,
     key: String,
-    labelsById: Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry> = emptyMap()
+    labelsById: Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry> = emptyMap(),
+    overrides: Map<Long, Map<String, Boolean>> = emptyMap()
 ): Boolean {
     val b = item.bucket.lowercase()
     if (key.startsWith("cat_")) {
+        // Manual correction always wins over the scanner.
+        overrides[item.id]?.get(key)?.let { excluded -> return !excluded }
         val entry = labelsById[item.id] ?: return false
         val cats = app.eightcloud.gallery.labels.Categories.forItem(
             faceCount = entry.faceCount,
-            labels = entry.labels.split(",").filter { it.isNotBlank() }.toSet(),
+            faceMaxRatio = entry.faceMaxRatio,
+            labelConfs = confsOf(entry),
+            ocrChars = entry.ocrChars,
             nsfwScore = entry.nsfwScore,
             isScreenshot = b.contains("screenshot"),
             cameraBucket = b.contains("camera") || b.contains("dcim")
@@ -428,6 +438,45 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     val labelScanProgress: StateFlow<Pair<Int, Int>?> = _labelScanProgress
     private var labelScanJob: kotlinx.coroutines.Job? = null
 
+    private val _categoryOverrides = MutableStateFlow<Map<Long, Map<String, Boolean>>>(emptyMap())
+    val categoryOverrides: StateFlow<Map<Long, Map<String, Boolean>>> = _categoryOverrides
+
+    private var overridesLoaded = false
+
+    private fun loadCategoryOverrides() {
+        viewModelScope.launch {
+            val all = withContext(Dispatchers.IO) {
+                app.eightcloud.gallery.backup.BackupDb.get(getApplication())
+                    .categoryOverrideDao().all()
+            }
+            _categoryOverrides.value = all.groupBy({ it.mediaStoreId }, { it.category to it.excluded })
+                .mapValues { it.value.toMap() }
+            overridesLoaded = true
+            computeCategoryAlbums()
+            applyView()
+        }
+    }
+
+    /** Marks an item as "not this category" (excluded=true) or back to normal (null). */
+    fun setCategoryOverride(mediaStoreId: Long, category: String, excluded: Boolean?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dao = app.eightcloud.gallery.backup.BackupDb.get(getApplication()).categoryOverrideDao()
+            if (excluded == null) dao.delete(mediaStoreId, category)
+            else dao.upsert(
+                app.eightcloud.gallery.backup.CategoryOverride(
+                    mediaStoreId, category, excluded, System.currentTimeMillis()
+                )
+            )
+            val all = dao.all()
+            _categoryOverrides.value = all.groupBy({ it.mediaStoreId }, { it.category to it.excluded })
+                .mapValues { it.value.toMap() }
+            withContext(Dispatchers.Main) {
+                computeCategoryAlbums()
+                applyView()
+            }
+        }
+    }
+
     fun categoryEnabled(key: String): Boolean = prefs.getBoolean("cat_enabled_" + key, true)
 
     fun setCategoryEnabled(key: String, enabled: Boolean) {
@@ -449,7 +498,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         SmartAlbum(
                             key,
                             app.eightcloud.gallery.labels.Categories.title(key),
-                            source.count { item -> matchesSmartAlbum(item, key, labels) }
+                            source.count { item -> matchesSmartAlbum(item, key, labels, _categoryOverrides.value) }
                         )
                     }
             }
@@ -466,9 +515,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 mediaLabelDao.all().associateBy { it.mediaStoreId }
             }
             computeCategoryAlbums()
+            if (!overridesLoaded) loadCategoryOverrides()
             while (true) {
-                val done = _mediaLabels.value.keys
-                val pending = allItems.filter { !it.isVideo && it.id !in done }
+                val done = _mediaLabels.value
+                val current = app.eightcloud.gallery.labels.MediaScanner.CURRENT_SCAN_VERSION
+                val pending = allItems.filter {
+                    !it.isVideo && (it.id !in done || (done[it.id]?.scanVersion ?: 0) < current)
+                }
                 if (pending.isEmpty()) break
                 _labelScanProgress.value = (allItems.size - pending.size) to allItems.size
                 pending.take(25).forEach { item ->
@@ -906,6 +959,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val smart = _smartFilter.value
         val secure = _secureIds.value
         val labelSnapshot = _mediaLabels.value
+        val overrideSnapshot = _categoryOverrides.value
         val memoriesEnabled = _featureToggles.value["feat_on_this_day"] != false
         val memories = _memories.value
         val source = allItems
@@ -915,7 +969,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 if (secure.isNotEmpty()) base = base.filter { it.id !in secure }
                 var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
-                if (smart != null) view = view.filter { matchesSmartAlbum(it, smart, labelSnapshot) }
+                if (smart != null) view = view.filter { matchesSmartAlbum(it, smart, labelSnapshot, overrideSnapshot) }
                 if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
                 if (videosOnly) view = view.filter { it.isVideo }
                 if (query.isNotEmpty()) {

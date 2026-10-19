@@ -129,8 +129,36 @@ data class MediaLabelEntry(
     val faceCount: Int,
     val labels: String, // comma-separated ML Kit labels
     val nsfwScore: Float, // -1 when not computed
-    val scannedAt: Long
+    val scannedAt: Long,
+    val faceMaxRatio: Float = 0f, // largest face bounding-box area / image area
+    val ocrChars: Int = 0, // characters found by on-device OCR; -1 = not run
+    val labelConfs: String = "", // comma-separated label:confidence pairs
+    val scanVersion: Int = 1 // < CURRENT_SCAN_VERSION rows get rescanned lazily
 )
+
+/** Manual per-item category corrections from the user; override the scanner. */
+@Entity(tableName = "category_overrides", primaryKeys = ["mediaStoreId", "category"])
+data class CategoryOverride(
+    val mediaStoreId: Long,
+    val category: String,
+    val excluded: Boolean, // true = "not this category", false = forced in
+    val setAt: Long
+)
+
+@Dao
+interface CategoryOverrideDao {
+    @Query("SELECT * FROM category_overrides")
+    suspend fun all(): List<CategoryOverride>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(override: CategoryOverride)
+
+    @Query("DELETE FROM category_overrides WHERE mediaStoreId = :id AND category = :category")
+    suspend fun delete(id: Long, category: String)
+
+    @Query("SELECT * FROM category_overrides WHERE mediaStoreId = :id")
+    suspend fun forItem(id: Long): List<CategoryOverride>
+}
 
 @Dao
 interface MediaLabelDao {
@@ -151,6 +179,9 @@ interface MediaLabelDao {
 
     @Query("DELETE FROM media_labels WHERE mediaStoreId = :id")
     suspend fun delete(id: Long)
+
+    @Query("SELECT mediaStoreId FROM media_labels WHERE scanVersion < :version")
+    suspend fun outdatedIds(version: Int): List<Long>
 }
 
 /** EXIF GPS cache per media item (map view). lat/lon NULL = scanned, no GPS. */
@@ -177,12 +208,13 @@ interface GeoDao {
     suspend fun locatedCount(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class], version = 8, exportSchema = false)
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class], version = 9, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
     abstract fun mediaLabelDao(): MediaLabelDao
     abstract fun geoDao(): GeoDao
+    abstract fun categoryOverrideDao(): CategoryOverrideDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -221,6 +253,23 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE media_labels ADD COLUMN faceMaxRatio REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE media_labels ADD COLUMN ocrChars INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE media_labels ADD COLUMN labelConfs TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE media_labels ADD COLUMN scanVersion INTEGER NOT NULL DEFAULT 1")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS category_overrides (" +
+                        "mediaStoreId INTEGER NOT NULL, " +
+                        "category TEXT NOT NULL, " +
+                        "excluded INTEGER NOT NULL, " +
+                        "setAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(mediaStoreId, category))"
+                )
+            }
+        }
+
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE backup_index ADD COLUMN keyTag TEXT NOT NULL DEFAULT 'ks'")
@@ -252,7 +301,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9).build().also { instance = it }
         }
     }
 }

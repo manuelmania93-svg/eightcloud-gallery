@@ -37,6 +37,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -454,6 +455,77 @@ private fun InfoPanel(viewModel: GalleryViewModel, item: MediaItem, modifier: Mo
                 d.focalLength?.let { infoRow("Focal length", "$it mm") }
                 d.exposure?.let { infoRow("Exposure", it) }
                 infoRow("Cloud status", d.cloudStatus)
+
+                // Analysis: what the on-device scanner saw, and corrections.
+                val labelsMap by viewModel.mediaLabels.collectAsState()
+                val overridesMap by viewModel.categoryOverrides.collectAsState()
+                val entry = labelsMap[item.id]
+                if (entry != null && !item.isVideo) {
+                    val b = item.bucket.lowercase()
+                    val cats = app.eightcloud.gallery.labels.Categories.forItem(
+                        entry.faceCount, entry.faceMaxRatio, confsOf(entry), entry.ocrChars,
+                        entry.nsfwScore, b.contains("screenshot"),
+                        b.contains("camera") || b.contains("dcim")
+                    )
+                    val excluded = overridesMap[item.id]?.filterValues { it }?.keys ?: emptySet()
+                    Text(
+                        text = "Analysis",
+                        color = Color(0xFFB9CCDC),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                    )
+                    val confPairs = app.eightcloud.gallery.labels.Categories.parseConfs(confsOf(entry))
+                    if (confPairs.isNotEmpty()) {
+                        infoRow(
+                            "Labels",
+                            confPairs.take(8).joinToString(", ") {
+                                it.first + " " + (it.second * 100).toInt() + "%"
+                            }
+                        )
+                    }
+                    if (entry.faceCount > 0) {
+                        infoRow(
+                            "Faces",
+                            entry.faceCount.toString() + " (largest " +
+                                String.format(java.util.Locale.US, "%.1f", entry.faceMaxRatio * 100) + "%)"
+                        )
+                    }
+                    infoRow("Text (OCR)", entry.ocrChars.toString() + " chars")
+                    if (entry.nsfwScore >= 0f) {
+                        infoRow(
+                            "Sensitive score",
+                            String.format(java.util.Locale.US, "%.2f", entry.nsfwScore)
+                        )
+                    }
+                    infoRow(
+                        "Categories",
+                        if (cats.isEmpty()) "none" else cats.joinToString(", ") {
+                            app.eightcloud.gallery.labels.Categories.title(it)
+                        }
+                    )
+                    cats.forEach { cat ->
+                        TextButton(
+                            onClick = { viewModel.setCategoryOverride(item.id, cat, true) },
+                            modifier = Modifier.padding(vertical = 0.dp)
+                        ) {
+                            Text(
+                                "Not " + app.eightcloud.gallery.labels.Categories.title(cat),
+                                color = Color(0xFFEF9A9A)
+                            )
+                        }
+                    }
+                    excluded.forEach { cat ->
+                        TextButton(
+                            onClick = { viewModel.setCategoryOverride(item.id, cat, null) },
+                            modifier = Modifier.padding(vertical = 0.dp)
+                        ) {
+                            Text(
+                                "Undo: not " + app.eightcloud.gallery.labels.Categories.title(cat),
+                                color = Color(0xFFA5D6A7)
+                            )
+                        }
+                    }
+                }
             }
         }
     }

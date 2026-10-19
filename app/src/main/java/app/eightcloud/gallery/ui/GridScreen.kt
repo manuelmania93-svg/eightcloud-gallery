@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.CloudUpload
@@ -265,6 +266,20 @@ fun GridScreen(viewModel: GalleryViewModel) {
                             }
                         }) {
                             Icon(Icons.Filled.Share, contentDescription = "Share selected")
+                        }
+                        if (smartFilter?.startsWith("cat_") == true) {
+                            IconButton(onClick = {
+                                val cat = smartFilter!!
+                                selection.forEach { id ->
+                                    viewModel.setCategoryOverride(id, cat, true)
+                                }
+                                viewModel.clearSelection()
+                            }) {
+                                Icon(
+                                    Icons.Filled.Clear,
+                                    contentDescription = "Not this category"
+                                )
+                            }
                         }
                         IconButton(onClick = { viewModel.trashSelection() }) {
                             Icon(Icons.Filled.DeleteOutline, contentDescription = "Move to trash")
