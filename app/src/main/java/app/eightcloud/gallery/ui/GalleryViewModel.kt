@@ -133,6 +133,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _items = MutableStateFlow<List<MediaItem>>(emptyList())
     val items: StateFlow<List<MediaItem>> = _items
 
+    // Grid entries (day/letter headers interleaved) built off the main
+    // thread in applyView; building 40k+ entries during composition froze
+    // the UI on large libraries.
+    private val _entries = MutableStateFlow<List<GridEntry>>(emptyList())
+    val entries: StateFlow<List<GridEntry>> = _entries
+
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading
 
@@ -393,6 +399,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 val sorted = view.sortedWith(MediaSort.comparator(field, ascending))
+                val entries = buildEntries(sorted, field)
                 val active = base
                 val counts = mapOf(
                     StatusFilter.ALL to active.size,
@@ -403,10 +410,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     },
                     StatusFilter.CLOUD_ONLY to active.count { statusMap[it.id] == BackupEntry.CLOUD_ONLY }
                 )
-                sorted to counts
+                Triple(sorted, counts, entries)
             }
             _items.value = result.first
             _sectionCounts.value = result.second
+            _entries.value = result.third
         }
     }
 

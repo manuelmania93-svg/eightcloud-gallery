@@ -55,6 +55,7 @@ import app.eightcloud.gallery.ui.ViewerScreen
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLogger.install(this)
         enableEdgeToEdge()
         // VideoFrameDecoder so video thumbnails actually render in the grid.
         Coil.setImageLoader(
@@ -107,23 +108,29 @@ fun EightCloudApp() {
             }
             if (granted && appLock && !appUnlocked) {
                 LockScreen(onUnlock = {
-                    val executor = ContextCompat.getMainExecutor(context)
-                    val prompt = androidx.biometric.BiometricPrompt(
-                        context as androidx.fragment.app.FragmentActivity,
-                        executor,
-                        object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
-                            override fun onAuthenticationSucceeded(
-                                result: androidx.biometric.BiometricPrompt.AuthenticationResult
-                            ) {
-                                viewModel.unlockApp()
+                    runCatching {
+                        val executor = ContextCompat.getMainExecutor(context)
+                        val prompt = androidx.biometric.BiometricPrompt(
+                            context as androidx.fragment.app.FragmentActivity,
+                            executor,
+                            object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+                                override fun onAuthenticationSucceeded(
+                                    result: androidx.biometric.BiometricPrompt.AuthenticationResult
+                                ) {
+                                    viewModel.unlockApp()
+                                }
                             }
-                        }
-                    )
-                    val info = androidx.biometric.BiometricPrompt.PromptInfo.Builder()
-                        .setTitle("Unlock 8CloudGallery")
-                        .setDeviceCredentialAllowed(true)
-                        .build()
-                    prompt.authenticate(info)
+                        )
+                        val info = androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+                            .setTitle("Unlock 8CloudGallery")
+                            .setDeviceCredentialAllowed(true)
+                            .build()
+                        prompt.authenticate(info)
+                    }.onFailure {
+                        // No working biometrics/screen lock on this device:
+                        // unlock rather than crash-lock the user out.
+                        viewModel.unlockApp()
+                    }
                 })
             } else if (granted) {
                 androidx.compose.material3.Scaffold(

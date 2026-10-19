@@ -179,7 +179,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
     val jumpToEntryIndex = remember { mutableStateOf<Int?>(null) }
     var zoomAccumulator by remember { mutableStateOf(1f) }
 
-    val entries = remember(items, sortField) { buildEntries(items, sortField) }
+    val entries by viewModel.entries.collectAsState()
     val gridState = rememberLazyGridState()
     androidx.compose.runtime.LaunchedEffect(jumpToEntryIndex.value) {
         jumpToEntryIndex.value?.let { target ->
@@ -548,7 +548,9 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
             ?: if (total <= 1) 0f
             else (gridState.firstVisibleItemIndex.toFloat() / (total - 1)).coerceIn(0f, 1f)
         val thumbOffsetDp = with(density) { (fraction * trackHeightPx).toDp() }
-        val showBubble = dragOffsetPx != null || gridState.isScrollInProgress
+        // Only while dragging: a bubble popping up on every fling looked
+        // like a second scrollbar next to the thumb.
+        val showBubble = dragOffsetPx != null
 
         // The whole strip is a jump zone: tap or drag anywhere on it to go
         // straight to that position, no matter how large the library is.

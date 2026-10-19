@@ -28,6 +28,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -144,6 +147,59 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 10.dp)
         )
+
+        // Crash log: if the app died unexpectedly, the last stack trace can
+        // be viewed and shared from here after the restart.
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var crashLog by remember { mutableStateOf(app.eightcloud.gallery.CrashLogger.read(context)) }
+        var showCrashDialog by remember { mutableStateOf(false) }
+        if (crashLog != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showCrashDialog = true }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.padding(start = 12.dp)) {
+                    Text("Last crash log", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "The app crashed last time - tap to view or share",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        if (showCrashDialog && crashLog != null) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showCrashDialog = false },
+                title = { Text("Last crash") },
+                text = {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        Text(crashLog ?: "", style = MaterialTheme.typography.bodySmall)
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_TEXT, crashLog)
+                        }
+                        context.startActivity(
+                            android.content.Intent.createChooser(send, "Share crash log")
+                        )
+                    }) { Text("Share") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        app.eightcloud.gallery.CrashLogger.clear(context)
+                        crashLog = null
+                        showCrashDialog = false
+                    }) { Text("Delete") }
+                }
+            )
+        }
 
         Row(
             modifier = Modifier
