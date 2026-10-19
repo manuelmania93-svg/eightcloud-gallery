@@ -148,7 +148,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
                 Text("Privacy screen", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Hide app content in recent apps and block screenshots",
+                    "Hide app content in recent apps and block screenshots everywhere (Secure folder always blocks them)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

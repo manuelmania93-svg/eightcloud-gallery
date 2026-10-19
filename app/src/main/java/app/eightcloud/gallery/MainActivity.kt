@@ -143,9 +143,9 @@ fun EightCloudApp() {
     val context = LocalContext.current
 
     // Privacy screen: hides the app in recents and blocks screenshots.
-    LaunchedEffect(privacyScreen) {
+    LaunchedEffect(privacyScreen, screen) {
         (context as? android.app.Activity)?.window?.let { w ->
-            if (privacyScreen) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            if (privacyScreen || screen == app.eightcloud.gallery.ui.Screen.SECURE) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
             else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         }
     }

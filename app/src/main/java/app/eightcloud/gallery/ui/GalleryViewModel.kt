@@ -897,7 +897,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     /** Re-locks the app (screen off). No-op state change when lock is off. */
     fun lockApp() { _appUnlocked.value = false }
 
-    private val _privacyScreen = MutableStateFlow(prefs.getBoolean("privacyScreen", true))
+    private val _privacyScreen = MutableStateFlow(prefs.getBoolean("privacyScreen", false))
     val privacyScreen: StateFlow<Boolean> = _privacyScreen
 
     fun setPrivacyScreen(enabled: Boolean) {
