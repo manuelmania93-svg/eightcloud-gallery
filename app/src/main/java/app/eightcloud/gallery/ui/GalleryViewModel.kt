@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 data class SmartAlbum(val key: String, val title: String, val count: Int)
@@ -447,7 +447,57 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun openBackup() { _screen.value = Screen.BACKUP }
 
-    fun backToGrid() { _screen.value = Screen.GRID }
+    fun backToGrid() {
+        _screen.value = Screen.GRID
+        // Cheap sync-back: cleanup mode marks trash without refreshing.
+        refreshTrashItems()
+        applyView()
+    }
+
+    // Swipe-to-sort cleanup: oldest first, trash committed in batches by the
+    // trash store itself (SharedPreferences), view refresh deferred to exit.
+    private val _cleanupQueue = MutableStateFlow<List<MediaItem>>(emptyList())
+    val cleanupQueue: StateFlow<List<MediaItem>> = _cleanupQueue
+    private val _cleanupIndex = MutableStateFlow(0)
+    val cleanupIndex: StateFlow<Int> = _cleanupIndex
+    private val _cleanupTrashedCount = MutableStateFlow(0)
+    val cleanupTrashedCount: StateFlow<Int> = _cleanupTrashedCount
+    private val cleanupHistory = ArrayDeque<Pair<Long, Boolean>>()
+
+    fun openCleanup() {
+        _cleanupQueue.value = allItems
+            .filter { !_trashed.value.containsKey(it.id) }
+            .sortedBy { it.dateMillis }
+        _cleanupIndex.value = 0
+        _cleanupTrashedCount.value = 0
+        cleanupHistory.clear()
+        _screen.value = Screen.CLEANUP
+    }
+
+    fun cleanupKeepCurrent() {
+        val item = _cleanupQueue.value.getOrNull(_cleanupIndex.value) ?: return
+        cleanupHistory.addLast(item.id to false)
+        _cleanupIndex.value++
+    }
+
+    fun cleanupTrashCurrent() {
+        val item = _cleanupQueue.value.getOrNull(_cleanupIndex.value) ?: return
+        _trashed.value = _trashed.value + (item.id to System.currentTimeMillis())
+        saveTrash()
+        _cleanupTrashedCount.value++
+        cleanupHistory.addLast(item.id to true)
+        _cleanupIndex.value++
+    }
+
+    fun cleanupUndo() {
+        val last = cleanupHistory.removeLastOrNull() ?: return
+        if (last.second) {
+            _trashed.value = _trashed.value - last.first
+            saveTrash()
+            _cleanupTrashedCount.value--
+        }
+        _cleanupIndex.value--
+    }
 
     suspend fun loadDetails(item: MediaItem): MediaDetails = withContext(Dispatchers.IO) {
         DetailsLoader.load(getApplication(), item)

@@ -43,6 +43,7 @@ import app.eightcloud.gallery.ui.DuplicatesScreen
 import app.eightcloud.gallery.ui.RestoreScreen
 import app.eightcloud.gallery.ui.TrashScreen
 import app.eightcloud.gallery.ui.BackupScreen
+import app.eightcloud.gallery.ui.CleanupScreen
 import app.eightcloud.gallery.ui.BackupViewModel
 import app.eightcloud.gallery.ui.EightCloudTheme
 import app.eightcloud.gallery.ui.GalleryViewModel
@@ -221,6 +222,7 @@ fun EightCloudApp() {
                             }
                             Screen.SETTINGS -> SettingsScreen(viewModel)
                             Screen.STORAGE_STATS -> StorageStatsScreen(viewModel, onBack = { viewModel.backToGrid() })
+                            Screen.CLEANUP -> CleanupScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.BACKUP -> {
                                 val backupViewModel: BackupViewModel = viewModel()
                                 BackupScreen(backupViewModel, onBack = { viewModel.backToGrid() })

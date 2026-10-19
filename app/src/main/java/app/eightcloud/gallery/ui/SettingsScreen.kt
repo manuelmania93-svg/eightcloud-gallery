@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -161,6 +162,31 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
                     Text("Storage stats", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "Sizes per folder, biggest files, space you can free",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        if (featureToggles["feat_cleanup"] != false) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.openCleanup() }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.DeleteSweep,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column(modifier = Modifier.padding(start = 12.dp)) {
+                    Text("Cleanup mode", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Swipe through your photos: left to trash, right to keep",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
