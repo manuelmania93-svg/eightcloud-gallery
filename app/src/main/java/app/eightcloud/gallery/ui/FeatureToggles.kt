@@ -7,7 +7,7 @@ val FEATURE_TOGGLES = listOf(
     FeatureToggle("feat_slideshow", "Slideshow", "Play your photos as a slideshow"),
     FeatureToggle("feat_on_this_day", "On this day", "Memories from past years"),
     FeatureToggle("feat_auto_albums", "Auto albums", "Screenshots, camera, videos, by month"),
-    FeatureToggle("feat_map", "Map view", "See your photos on a map", available = false),
+    FeatureToggle("feat_map", "Map view", "See your photos on a map"),
     FeatureToggle("feat_widget", "Photo of the day widget", "A random photo on your home screen"),
     FeatureToggle("feat_edit", "Basic editing", "Rotate, crop, brightness, filters"),
     FeatureToggle("feat_secure_folder", "Secure folder", "Hide items behind the app lock"),

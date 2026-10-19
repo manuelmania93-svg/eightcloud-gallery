@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Settings
 import app.eightcloud.gallery.ui.AlbumsScreen
 import app.eightcloud.gallery.ui.DuplicatesScreen
 import app.eightcloud.gallery.ui.EditScreen
+import app.eightcloud.gallery.ui.MapScreen
 import app.eightcloud.gallery.ui.RestoreScreen
 import app.eightcloud.gallery.ui.TrashScreen
 import app.eightcloud.gallery.ui.BackupScreen
@@ -228,6 +229,7 @@ fun EightCloudApp() {
                             Screen.CLEANUP -> CleanupScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.SLIDESHOW -> SlideshowScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.EDIT -> EditScreen(viewModel, onBack = { viewModel.backToGrid() })
+                            Screen.MAP -> MapScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.SECURE -> SecureFolderScreen(
                                 viewModel,
                                 onBack = { viewModel.backToGrid() },
