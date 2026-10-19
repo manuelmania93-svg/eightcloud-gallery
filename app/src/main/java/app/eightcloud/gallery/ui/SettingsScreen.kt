@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
@@ -48,6 +49,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
+    val featureToggles by viewModel.featureToggles.collectAsState()
 
     BackHandler { viewModel.backToGrid() }
 
@@ -137,6 +139,58 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
                     "${trashItems.size} items - kept for 30 days",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (featureToggles["feat_storage_stats"] != false) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.openStorageStats() }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.BarChart,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column(modifier = Modifier.padding(start = 12.dp)) {
+                    Text("Storage stats", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Sizes per folder, biggest files, space you can free",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Text(
+            "Features",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+        )
+        FEATURE_TOGGLES.forEach { toggle ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(toggle.title, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        toggle.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    checked = featureToggles[toggle.key] != false,
+                    onCheckedChange = { viewModel.setFeatureEnabled(toggle.key, it) }
                 )
             }
         }

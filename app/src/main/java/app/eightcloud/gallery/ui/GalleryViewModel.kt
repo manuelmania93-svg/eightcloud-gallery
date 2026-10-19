@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
@@ -269,6 +269,54 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun openTrash() { _screen.value = Screen.TRASH }
     fun openDuplicates() { _screen.value = Screen.DUPLICATES }
     fun openRestore() { _screen.value = Screen.RESTORE }
+
+    // Optional features, each switchable in Settings (default on).
+    private val _featureToggles = MutableStateFlow(loadFeatureToggles())
+    val featureToggles: StateFlow<Map<String, Boolean>> = _featureToggles
+
+    private fun loadFeatureToggles(): Map<String, Boolean> =
+        FEATURE_TOGGLES.associate { it.key to prefs.getBoolean(it.key, true) }
+
+    fun setFeatureEnabled(key: String, enabled: Boolean) {
+        prefs.edit().putBoolean(key, enabled).apply()
+        _featureToggles.value = _featureToggles.value + (key to enabled)
+    }
+
+    fun featureEnabled(key: String): Boolean = _featureToggles.value[key] != false
+
+    // Storage stats, computed on demand when the screen opens.
+    private val _storageStats = MutableStateFlow<StorageStats?>(null)
+    val storageStats: StateFlow<StorageStats?> = _storageStats
+
+    fun openStorageStats() {
+        _screen.value = Screen.STORAGE_STATS
+        if (_storageStats.value != null) return
+        val source = allItems
+        val trashed = _trashed.value
+        val groups = _duplicateGroups.value
+        viewModelScope.launch {
+            _storageStats.value = withContext(Dispatchers.Default) {
+                val active = source.filter { !trashed.containsKey(it.id) }
+                val buckets = active.groupBy { it.bucket.ifBlank { "Other" } }
+                    .map { (b, list) -> BucketStat(b, list.size, list.sumOf { it.sizeBytes }) }
+                    .sortedByDescending { it.bytes }
+                val biggest = active.sortedByDescending { it.sizeBytes }.take(20)
+                val trashItems = source.filter { trashed.containsKey(it.id) }
+                val dupSavings = groups.sumOf { g ->
+                    g.sumOf { it.sizeBytes } - (g.firstOrNull()?.sizeBytes ?: 0L)
+                }
+                StorageStats(
+                    totalCount = active.size,
+                    totalBytes = active.sumOf { it.sizeBytes },
+                    buckets = buckets,
+                    biggest = biggest,
+                    trashedCount = trashItems.size,
+                    trashedBytes = trashItems.sumOf { it.sizeBytes },
+                    duplicateSavingsBytes = dupSavings
+                )
+            }
+        }
+    }
 
     private val _appLock = MutableStateFlow(prefs.getBoolean("appLock", false))
     val appLock: StateFlow<Boolean> = _appLock

@@ -49,6 +49,7 @@ import app.eightcloud.gallery.ui.GalleryViewModel
 import app.eightcloud.gallery.ui.GridScreen
 import app.eightcloud.gallery.ui.Screen
 import app.eightcloud.gallery.ui.SettingsScreen
+import app.eightcloud.gallery.ui.StorageStatsScreen
 import app.eightcloud.gallery.ui.ThemeMode
 import app.eightcloud.gallery.ui.ViewerScreen
 
@@ -219,6 +220,7 @@ fun EightCloudApp() {
                                 RestoreScreen(backupViewModel, onBack = { viewModel.backToGrid() })
                             }
                             Screen.SETTINGS -> SettingsScreen(viewModel)
+                            Screen.STORAGE_STATS -> StorageStatsScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.BACKUP -> {
                                 val backupViewModel: BackupViewModel = viewModel()
                                 BackupScreen(backupViewModel, onBack = { viewModel.backToGrid() })
