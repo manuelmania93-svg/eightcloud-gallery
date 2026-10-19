@@ -34,6 +34,9 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
     val featureToggles by viewModel.featureToggles.collectAsState()
     val buckets = bucketCounts.entries.sortedByDescending { it.value }
     val showAuto = featureToggles["feat_auto_albums"] != false
+    val categoryAlbums by viewModel.categoryAlbums.collectAsState()
+    val labelScanProgress by viewModel.labelScanProgress.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.scanLabels() }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Albums") }) }) { innerPadding ->
         LazyColumn(
@@ -41,6 +44,27 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            item(key = "hdr-cats") {
+                Text(
+                    "Categories" + labelScanProgress.let { p ->
+                        if (p != null) " (analyzing ${p.first}/${p.second})" else ""
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+            items(categoryAlbums, key = { it.key }) { album ->
+                AlbumRow(
+                    title = album.title,
+                    count = album.count,
+                    onClick = {
+                        viewModel.setSmartFilter(album.key)
+                        viewModel.backToGrid()
+                    }
+                )
+                HorizontalDivider()
+            }
             if (showAuto && smartAlbums.isNotEmpty()) {
                 item(key = "hdr-smart") {
                     Text(

@@ -30,8 +30,23 @@ internal fun monthTitle(yearMonth: String): String = runCatching {
         .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
 }.getOrDefault(yearMonth)
 
-internal fun matchesSmartAlbum(item: MediaItem, key: String): Boolean {
+internal fun matchesSmartAlbum(
+    item: MediaItem,
+    key: String,
+    labelsById: Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry> = emptyMap()
+): Boolean {
     val b = item.bucket.lowercase()
+    if (key.startsWith("cat_")) {
+        val entry = labelsById[item.id] ?: return false
+        val cats = app.eightcloud.gallery.labels.Categories.forItem(
+            faceCount = entry.faceCount,
+            labels = entry.labels.split(",").filter { it.isNotBlank() }.toSet(),
+            nsfwScore = entry.nsfwScore,
+            isScreenshot = b.contains("screenshot"),
+            cameraBucket = b.contains("camera") || b.contains("dcim")
+        )
+        return key in cats
+    }
     return when {
         key == "screenshots" -> b.contains("screenshot")
         key == "videos" -> item.isVideo
@@ -322,6 +337,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             app.eightcloud.gallery.AppLog.log("media", "loaded " + result.size + " items")
             _secureIds.value = withContext(Dispatchers.IO) { secureDao.ids() }.toSet()
             refreshSecureItems()
+            _mediaLabels.value = withContext(Dispatchers.IO) {
+                mediaLabelDao.all().associateBy { it.mediaStoreId }
+            }
+            computeCategoryAlbums()
             computeAlbumsAndMemories()
             _bucketCounts.value = result.groupingBy { it.bucket.ifBlank { "Other" } }.eachCount()
             refreshTrashItems()
@@ -400,6 +419,72 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _geoScanning = MutableStateFlow(false)
     val geoScanning: StateFlow<Boolean> = _geoScanning
     private var geoScanJob: kotlinx.coroutines.Job? = null
+
+    // v0.7.0: on-device categorization (people/documents/memes/scenes).
+    private val mediaLabelDao by lazy { BackupDb.get(getApplication()).mediaLabelDao() }
+    private val _mediaLabels = MutableStateFlow<Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry>>(emptyMap())
+    val mediaLabels: StateFlow<Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry>> = _mediaLabels
+    private val _labelScanProgress = MutableStateFlow<Pair<Int, Int>?>(null) // scanned/total while running
+    val labelScanProgress: StateFlow<Pair<Int, Int>?> = _labelScanProgress
+    private var labelScanJob: kotlinx.coroutines.Job? = null
+
+    fun categoryEnabled(key: String): Boolean = prefs.getBoolean("cat_enabled_" + key, true)
+
+    fun setCategoryEnabled(key: String, enabled: Boolean) {
+        prefs.edit().putBoolean("cat_enabled_" + key, enabled).apply()
+        computeCategoryAlbums()
+    }
+
+    private val _categoryAlbums = MutableStateFlow<List<SmartAlbum>>(emptyList())
+    val categoryAlbums: StateFlow<List<SmartAlbum>> = _categoryAlbums
+
+    private fun computeCategoryAlbums() {
+        val labels = _mediaLabels.value
+        val source = allItems
+        viewModelScope.launch {
+            val albums = withContext(Dispatchers.Default) {
+                app.eightcloud.gallery.labels.Categories.ALL
+                    .filter { categoryEnabled(it) }
+                    .map { key ->
+                        SmartAlbum(
+                            key,
+                            app.eightcloud.gallery.labels.Categories.title(key),
+                            source.count { item -> matchesSmartAlbum(item, key, labels) }
+                        )
+                    }
+            }
+            _categoryAlbums.value = albums
+        }
+    }
+
+    /** Incrementally analyze the library (images only for now), cached in Room. */
+    fun scanLabels() {
+        if (labelScanJob?.isActive == true) return
+        labelScanJob = viewModelScope.launch {
+            val scanner = app.eightcloud.gallery.labels.MediaScanner(getApplication())
+            _mediaLabels.value = withContext(Dispatchers.IO) {
+                mediaLabelDao.all().associateBy { it.mediaStoreId }
+            }
+            computeCategoryAlbums()
+            while (true) {
+                val done = _mediaLabels.value.keys
+                val pending = allItems.filter { !it.isVideo && it.id !in done }
+                if (pending.isEmpty()) break
+                _labelScanProgress.value = (allItems.size - pending.size) to allItems.size
+                pending.take(25).forEach { item ->
+                    runCatching {
+                        scanner.scan(item.id, android.net.Uri.parse(item.uri))
+                    }?.let { entry ->
+                        if (entry != null) {
+                            _mediaLabels.value = _mediaLabels.value + (entry.mediaStoreId to entry)
+                        }
+                    }
+                }
+                computeCategoryAlbums()
+            }
+            _labelScanProgress.value = null
+        }
+    }
 
     fun scanGeo() {
         if (geoScanJob?.isActive == true) return
@@ -811,6 +896,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val statusMap = _statusById.value
         val smart = _smartFilter.value
         val secure = _secureIds.value
+        val labelSnapshot = _mediaLabels.value
         val memoriesEnabled = _featureToggles.value["feat_on_this_day"] != false
         val memories = _memories.value
         val source = allItems
@@ -820,7 +906,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 if (secure.isNotEmpty()) base = base.filter { it.id !in secure }
                 var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
-                if (smart != null) view = view.filter { matchesSmartAlbum(it, smart) }
+                if (smart != null) view = view.filter { matchesSmartAlbum(it, smart, labelSnapshot) }
                 if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
                 if (videosOnly) view = view.filter { it.isVideo }
                 if (query.isNotEmpty()) {

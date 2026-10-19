@@ -349,6 +349,35 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             }
         }
 
+        Text(
+            "Categories",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+        app.eightcloud.gallery.labels.Categories.ALL.forEach { key ->
+            var enabled by androidx.compose.runtime.remember(key) {
+                androidx.compose.runtime.mutableStateOf(viewModel.categoryEnabled(key))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    app.eightcloud.gallery.labels.Categories.title(key),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                androidx.compose.material3.Switch(
+                    checked = enabled,
+                    onCheckedChange = {
+                        enabled = it
+                        viewModel.setCategoryEnabled(key, it)
+                    }
+                )
+            }
+        }
+
         if (featureToggles["feat_cleanup"] != false) {
             Row(
                 modifier = Modifier
