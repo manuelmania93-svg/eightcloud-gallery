@@ -10,7 +10,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
@@ -167,5 +169,16 @@ class MainActivitySmokeTest {
         values.put(MediaStore.Images.Media.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
         return uri
+    }
+
+    @Test
+    fun gridScrollsWith41kSyntheticItems() {
+        val vm = ViewModelProvider(composeRule.activity)[GalleryViewModel::class.java]
+        composeRule.waitUntil(timeoutMillis = 20000) { !vm.loading.value }
+        composeRule.runOnIdle { vm.loadSyntheticForTest(41_052) }
+        composeRule.waitUntil(timeoutMillis = 20000) { vm.items.value.size == 41_052 }
+        composeRule.onNodeWithTag("mediaGrid").assertIsDisplayed()
+        composeRule.onNodeWithTag("mediaGrid").performScrollToIndex(41_000)
+        composeRule.waitForIdle()
     }
 }

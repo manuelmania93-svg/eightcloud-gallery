@@ -277,6 +277,32 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun unlockApp() { _appUnlocked.value = true }
 
+    /** Test hook: loads synthetic items without MediaStore (debug builds only). */
+    fun loadSyntheticForTest(count: Int) {
+        if (!app.eightcloud.gallery.BuildConfig.DEBUG) return
+        val now = System.currentTimeMillis()
+        allItems = (1..count).map {
+            MediaItem(
+                id = it.toLong(),
+                uri = "content://synthetic/$it",
+                isVideo = it % 9 == 0,
+                name = "SYN_$it.jpg",
+                dateMillis = now - it * 3_600_000L,
+                sizeBytes = 1_000_000L + it,
+                width = 4000,
+                height = 3000,
+                durationMs = if (it % 9 == 0) 60_000L else 0L,
+                bucket = "Synthetic",
+                mimeType = "image/jpeg"
+            )
+        }
+        _bucketCounts.value = allItems.groupingBy { it.bucket }.eachCount()
+        refreshTrashItems()
+        computeDuplicates()
+        applyView()
+        _loading.value = false
+    }
+
     fun openBackup() { _screen.value = Screen.BACKUP }
 
     fun backToGrid() { _screen.value = Screen.GRID }

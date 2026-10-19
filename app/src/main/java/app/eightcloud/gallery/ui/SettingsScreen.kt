@@ -138,6 +138,13 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             }
         }
 
+        Text(
+            text = "Version " + app.eightcloud.gallery.BuildConfig.VERSION_NAME,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 10.dp)
+        )
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()

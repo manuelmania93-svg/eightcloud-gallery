@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,12 +111,12 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-private sealed class GridEntry(val key: String) {
+internal sealed class GridEntry(val key: String) {
     class Header(val title: String, var count: Int = 0) : GridEntry("header-$title")
     class Media(val item: MediaItem) : GridEntry("media-${item.id}")
 }
 
-private fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEntry> {
+internal fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEntry> {
     val entries = ArrayList<GridEntry>(items.size + 64)
     var lastLabel: String? = null
     val zone = ZoneId.systemDefault()
@@ -172,10 +174,35 @@ fun GridScreen(viewModel: GalleryViewModel) {
 
     androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshBackupStatus() }
     var sortMenuOpen by remember { mutableStateOf(false) }
+    var sliderDragging by remember { mutableStateOf(false) }
+    var showJumpPicker by remember { mutableStateOf(false) }
+    val jumpToEntryIndex = remember { mutableStateOf<Int?>(null) }
     var zoomAccumulator by remember { mutableStateOf(1f) }
 
     val entries = remember(items, sortField) { buildEntries(items, sortField) }
     val gridState = rememberLazyGridState()
+    androidx.compose.runtime.LaunchedEffect(jumpToEntryIndex.value) {
+        jumpToEntryIndex.value?.let { target ->
+            jumpToEntryIndex.value = null
+            gridState.scrollToItem(target)
+        }
+    }
+    val monthJumps = remember(entries) {
+        // "yyyy-MM" -> first entry index to count, for the jump picker.
+        val zone = ZoneId.systemDefault()
+        val firstIndex = LinkedHashMap<String, Int>()
+        val counts = HashMap<String, Int>()
+        entries.forEachIndexed { index, entry ->
+            if (entry is GridEntry.Media) {
+                val ym = YearMonth.from(
+                    Instant.ofEpochMilli(entry.item.dateMillis).atZone(zone)
+                ).toString()
+                if (!firstIndex.containsKey(ym)) firstIndex[ym] = index
+                counts[ym] = (counts[ym] ?: 0) + 1
+            }
+        }
+        firstIndex.map { (ym, index) -> Triple(ym, index, counts[ym] ?: 0) }
+    }
 
     Scaffold(
         topBar = {
@@ -286,6 +313,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
                     columns = GridCells.Fixed(columns),
                     modifier = Modifier
                         .fillMaxSize()
+                        .testTag("mediaGrid")
                         .pointerInput(columns) {
                             // Pinch-to-zoom only: consume only when 2+ fingers are
                             // down, so single-finger scrolling is never eaten.
@@ -348,6 +376,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
                             }
                             is GridEntry.Media -> MediaThumb(
                                 item = entry.item,
+                                fastScrolling = sliderDragging,
                                 status = statusById[entry.item.id],
                                 isFavorite = favorites.contains(entry.item.id),
                                 isSelected = selection.contains(entry.item.id),
@@ -366,10 +395,78 @@ fun GridScreen(viewModel: GalleryViewModel) {
                 }
             }
             if (entries.size > 30) {
-                FastScrollBar(gridState, entries, sortField)
+                FastScrollBar(gridState, entries, sortField, onDraggingChange = { sliderDragging = it })
+            }
+            if (sortField == SortField.DATE && entries.isNotEmpty()) {
+                // Sticky month-year pill: always shows where the grid is.
+                val firstIndex = gridState.firstVisibleItemIndex
+                val stickyMedia = (0..3).asSequence()
+                    .map { entries.getOrNull(firstIndex + it) }
+                    .filterIsInstance<GridEntry.Media>()
+                    .firstOrNull()
+                if (stickyMedia != null) {
+                    val stickyLabel = YearMonth.from(
+                        Instant.ofEpochMilli(stickyMedia.item.dateMillis)
+                            .atZone(ZoneId.systemDefault())
+                    ).format(DateTimeFormatter.ofPattern("MMMM yyyy"))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(50),
+                        shadowElevation = 4.dp,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 6.dp)
+                            .clickable { showJumpPicker = true }
+                    ) {
+                        Text(
+                            text = stickyLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+                }
             }
             }
         }
+    }
+
+    if (showJumpPicker) {
+        AlertDialog(
+            onDismissRequest = { showJumpPicker = false },
+            title = { Text("Jump to month") },
+            text = {
+                androidx.compose.foundation.lazy.LazyColumn {
+                    items(monthJumps.size) { index ->
+                        val (ym, entryIndex, count) = monthJumps[index]
+                        val label = YearMonth.parse(ym)
+                            .format(DateTimeFormatter.ofPattern("MMMM yyyy"))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showJumpPicker = false
+                                    jumpToEntryIndex.value = entryIndex
+                                }
+                                .padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(label, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "$count",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showJumpPicker = false }) { Text("Close") }
+            }
+        )
     }
 
     if (showDeleteDialog) {
@@ -411,13 +508,18 @@ fun GridScreen(viewModel: GalleryViewModel) {
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState: LazyGridState, entries: List<GridEntry>, field: SortField) {
+private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
+    gridState: LazyGridState,
+    entries: List<GridEntry>,
+    field: SortField,
+    onDraggingChange: (Boolean) -> Unit
+) {
     val scope = rememberCoroutineScope()
     BoxWithConstraints(
         modifier = Modifier
             .align(Alignment.CenterEnd)
             .fillMaxHeight()
-            .width(28.dp)
+            .width(32.dp)
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current
         val thumbHeight = 64.dp
@@ -425,6 +527,22 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
         val trackHeightPx = with(density) { (maxHeight - thumbHeight).toPx() }.coerceAtLeast(1f)
         val total = entries.size
         var dragOffsetPx by remember { mutableStateOf<Float?>(null) }
+        var pendingIndex by remember { mutableStateOf<Int?>(null) }
+
+        // Apply at most one jump per frame, latest target wins. Firing a
+        // scrollToItem per pointer-move event thrashes the scroll state at
+        // large library sizes.
+        androidx.compose.runtime.LaunchedEffect(dragOffsetPx != null) {
+            if (dragOffsetPx == null) return@LaunchedEffect
+            while (dragOffsetPx != null) {
+                val target = pendingIndex
+                if (target != null) {
+                    pendingIndex = null
+                    gridState.scrollToItem(target.coerceIn(0, total - 1))
+                }
+                withFrameNanos { }
+            }
+        }
 
         val fraction: Float = dragOffsetPx?.let { (it / trackHeightPx).coerceIn(0f, 1f) }
             ?: if (total <= 1) 0f
@@ -438,17 +556,14 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(28.dp)
+                .width(32.dp)
                 .pointerInput(total, trackHeightPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        onDraggingChange(true)
                         dragOffsetPx = (down.position.y - thumbHeightPx / 2f).coerceIn(0f, trackHeightPx)
-                        scope.launch {
-                            gridState.scrollToItem(
-                                ((dragOffsetPx!! / trackHeightPx) * (total - 1))
-                                    .roundToInt().coerceIn(0, total - 1)
-                            )
-                        }
+                        pendingIndex = ((dragOffsetPx!! / trackHeightPx) * (total - 1))
+                            .roundToInt().coerceIn(0, total - 1)
                         while (true) {
                             val event = awaitPointerEvent()
                             if (event.changes.none { it.pressed }) break
@@ -456,15 +571,17 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
                                 change.consume()
                                 dragOffsetPx = (change.position.y - thumbHeightPx / 2f)
                                     .coerceIn(0f, trackHeightPx)
-                                scope.launch {
-                                    gridState.scrollToItem(
-                                        ((dragOffsetPx!! / trackHeightPx) * (total - 1))
-                                            .roundToInt().coerceIn(0, total - 1)
-                                    )
-                                }
+                                pendingIndex = ((dragOffsetPx!! / trackHeightPx) * (total - 1))
+                                    .roundToInt().coerceIn(0, total - 1)
                             }
                         }
+                        val finalIndex = pendingIndex
                         dragOffsetPx = null
+                        pendingIndex = null
+                        onDraggingChange(false)
+                        if (finalIndex != null) {
+                            scope.launch { gridState.scrollToItem(finalIndex.coerceIn(0, total - 1)) }
+                        }
                     }
                 }
         )
@@ -489,7 +606,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .offset(y = thumbOffsetDp)
-                    .padding(end = 22.dp)
+                    .padding(end = 24.dp)
             ) {
                 Text(
                     text = label,
@@ -518,6 +635,7 @@ private fun bubbleLabelOf(entry: GridEntry?, field: SortField): String = when (e
 @Composable
 private fun MediaThumb(
     item: MediaItem,
+    fastScrolling: Boolean,
     status: String?,
     isFavorite: Boolean,
     isSelected: Boolean,
@@ -531,15 +649,17 @@ private fun MediaThumb(
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
-        AsyncImage(
-            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                .data(item.uri)
-                .size(512, 512)
-                .build(),
-            contentDescription = item.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        if (!fastScrolling) {
+            AsyncImage(
+                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                    .data(item.uri)
+                    .size(512, 512)
+                    .build(),
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
