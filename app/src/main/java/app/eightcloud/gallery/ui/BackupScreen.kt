@@ -206,7 +206,7 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
             onDismissRequest = { showFreeUpDialog = false },
             title = { Text("Free up space") },
             text = {
-                Text("Delete $freeCount local copies (${MediaSort.sizeLabel(freeBytes)})? Every one of them is verified in your cloud backup and can be restored later.")
+                Text("Delete $freeCount local copies (${MediaSort.sizeLabel(freeBytes)})? Each one has a completed cloud copy. Restoring needs this app installation: after an uninstall or clear-data the encryption key is gone and cloud copies can no longer be decrypted.")
             },
             confirmButton = {
                 TextButton(onClick = {
