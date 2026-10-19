@@ -32,6 +32,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.TextButton
+import app.eightcloud.gallery.backup.BackupProgress
 import app.eightcloud.gallery.data.MediaSort
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -372,12 +373,24 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                             listOfNotNull(
                                 progress.currentName.takeIf { it.isNotBlank() },
                                 if (progress.bytesTotal > 0)
-                                    "remaining: ${MediaSort.sizeLabel(remaining)}" else null
+                                    "remaining: ${MediaSort.sizeLabel(remaining)}" else null,
+                                if (progress.bytesPerSec > 0)
+                                    BackupProgress.formatSpeed(progress.bytesPerSec) else null,
+                                BackupProgress.formatEta(progress.etaSeconds)
+                                    .takeIf { it.isNotEmpty() }?.let { "$it left" }
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp)
                         )
+                        if (progress.running) {
+                            OutlinedButton(
+                                onClick = { viewModel.toggleUploadPause() },
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) {
+                                Text(if (progress.paused) "Resume uploads" else "Pause uploads")
+                            }
+                        }
                     }
                     if (failed.isNotEmpty()) {
                         Text(

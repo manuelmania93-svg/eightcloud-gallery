@@ -30,7 +30,7 @@ import java.io.FileOutputStream
  * Drives the backup pipeline: scan -> hash -> encrypt -> upload -> index.
  * Identity is the SHA-256 of the content, so renames/moves never re-upload.
  */
-/** Process-wide live upload progress, observed by the backup screen. */
+/** Process-wide live upload progress, observed by the backup screen and the worker notification. */
 object BackupProgress {
     data class State(
         val running: Boolean,
@@ -38,10 +38,42 @@ object BackupProgress {
         val total: Int,
         val bytesDone: Long,
         val bytesTotal: Long,
-        val currentName: String
+        val currentName: String,
+        val paused: Boolean = false,
+        val bytesPerSec: Double = 0.0,
+        val etaSeconds: Long = -1
     )
 
     val state = MutableStateFlow(State(false, 0, 0, 0L, 0L, ""))
+
+    fun formatSpeed(bytesPerSec: Double): String = when {
+        bytesPerSec >= 1_000_000 -> "%.1f MB/s".format(bytesPerSec / 1_000_000)
+        bytesPerSec >= 1_000 -> "%.0f KB/s".format(bytesPerSec / 1_000)
+        else -> "%.0f B/s".format(bytesPerSec)
+    }
+
+    fun formatEta(seconds: Long): String = when {
+        seconds < 0 -> ""
+        seconds < 60 -> "<1 min"
+        seconds < 3600 -> "~" + (seconds / 60) + " min"
+        else -> "~" + (seconds / 3600) + " h " + ((seconds % 3600) / 60) + " min"
+    }
+}
+
+/** Pause flag for uploads, persisted so the worker and the UI share it. */
+object BackupControl {
+    private const val KEY_PAUSED = "uploadPaused"
+
+    fun isPaused(context: Context): Boolean =
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getBoolean(KEY_PAUSED, false)
+
+    fun setPaused(context: Context, paused: Boolean) {
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_PAUSED, paused).apply()
+        BackupProgress.state.value = BackupProgress.state.value.copy(paused = paused)
+        app.eightcloud.gallery.AppLog.log("backup", if (paused) "uploads paused" else "uploads resumed")
+    }
 }
 
 class BackupEngine(private val context: Context) {
@@ -107,6 +139,9 @@ class BackupEngine(private val context: Context) {
         onlyIds: Set<Long>? = null,
         onProgress: (done: Int, total: Int, bytesDone: Long, bytesTotal: Long, currentName: String) -> Unit = { _, _, _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
+        // Re-queue FAILED entries first so they join this run's PENDING list.
+        val healed = db.dao().resetFailed()
+        if (healed > 0) app.eightcloud.gallery.AppLog.log("backup", "re-queued " + healed + " failed uploads")
         val pending = if (onlyIds == null) db.dao().byStatus(BackupEntry.PENDING)
         else db.dao().pendingByIds(onlyIds.toList())
         val total = pending.size
@@ -120,22 +155,43 @@ class BackupEngine(private val context: Context) {
         BackupProgress.state.value = BackupProgress.State(true, 0, total, 0L, totalBytes, "")
         app.eightcloud.gallery.AppLog.log("backup", "upload run start: " + total + " files, " + totalBytes + " bytes")
         var failures = 0
+        val meter = SpeedMeter()
+        val currentFileUploaded = java.util.concurrent.atomic.AtomicLong(0L)
+        var lastPush = 0L
+        fun pushState(index: Int, name: String, force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            if (!force && now - lastPush < 500) return
+            lastPush = now
+            val inFlight = doneBytes + currentFileUploaded.get()
+            meter.add(inFlight)
+            val rate = meter.bytesPerSecond()
+            BackupProgress.state.value = BackupProgress.State(
+                true, index, total, inFlight, totalBytes, name,
+                paused = BackupControl.isPaused(context),
+                bytesPerSec = rate,
+                etaSeconds = meter.etaSeconds(totalBytes - inFlight)
+            )
+        }
         pending.forEachIndexed { index, entry ->
+            waitIfPaused()
             onProgress(index, total, doneBytes, totalBytes, entry.name)
-            BackupProgress.state.value =
-                BackupProgress.State(true, index, total, doneBytes, totalBytes, entry.name)
+            currentFileUploaded.set(0L)
+            pushState(index, entry.name, force = true)
             try {
                 val thread = if (toGroup) (if (entry.isVideo) topicVids else topicPics) else null
-                uploadOne(entry, destChat, thread)
+                uploadWithRetry(entry, destChat, thread) { uploaded, _ ->
+                    currentFileUploaded.set(uploaded)
+                    pushState(index, entry.name)
+                }
             } catch (e: Exception) {
                 failures++
                 app.eightcloud.gallery.AppLog.log("backup", "FAILED " + entry.name + ": " + (e.message ?: e.javaClass.simpleName))
                 db.dao().markFailed(entry.contentHash, e.message ?: e.javaClass.simpleName)
             }
             doneBytes += entry.sizeBytes
+            currentFileUploaded.set(0L)
             onProgress(index + 1, total, doneBytes, totalBytes, entry.name)
-            BackupProgress.state.value =
-                BackupProgress.State(true, index + 1, total, doneBytes, totalBytes, entry.name)
+            pushState(index + 1, entry.name, force = true)
         }
         BackupProgress.state.value = BackupProgress.State(false, total, total, totalBytes, totalBytes, "")
         app.eightcloud.gallery.AppLog.log("backup", "upload run end: " + total + " files, " + failures + " failed")
@@ -162,7 +218,43 @@ class BackupEngine(private val context: Context) {
         }
     }
 
-    private suspend fun uploadOne(entry: BackupEntry, chatId: Long, threadId: Long? = null) {
+    /** Blocks while uploads are paused (Settings pref shared with the UI and worker). */
+    private suspend fun waitIfPaused() {
+        while (BackupControl.isPaused(context)) {
+            BackupProgress.state.value = BackupProgress.state.value.copy(paused = true)
+            kotlinx.coroutines.delay(500)
+        }
+        if (BackupProgress.state.value.paused) {
+            BackupProgress.state.value = BackupProgress.state.value.copy(paused = false)
+        }
+    }
+
+    /** Retries a file on transient failures (network loss) before giving up. */
+    private suspend fun uploadWithRetry(
+        entry: BackupEntry,
+        chatId: Long,
+        threadId: Long?,
+        onPartProgress: (uploadedInFile: Long, fileBytes: Long) -> Unit
+    ) {
+        val delaysMs = longArrayOf(15_000L, 60_000L)
+        var attempt = 0
+        while (true) {
+            try {
+                uploadOne(entry, chatId, threadId, onPartProgress)
+                return
+            } catch (e: Exception) {
+                if (attempt >= delaysMs.size) throw e
+                app.eightcloud.gallery.AppLog.log(
+                    "backup",
+                    "attempt " + (attempt + 1) + " failed for " + entry.name + ", retrying: " + (e.message ?: e.javaClass.simpleName)
+                )
+                kotlinx.coroutines.delay(delaysMs[attempt])
+                attempt++
+            }
+        }
+    }
+
+    private suspend fun uploadOne(entry: BackupEntry, chatId: Long, threadId: Long? = null, onPartProgress: (Long, Long) -> Unit = { _, _ -> }) {
         db.dao().setStatus(entry.contentHash, BackupEntry.UPLOADING)
         val splitEnabled = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .getBoolean("splitLargeFiles", true)
@@ -171,7 +263,11 @@ class BackupEngine(private val context: Context) {
         }
         val uri = uriFor(entry)
         val key = KeystoreKeys.backupKey()
-        val iv = BackupCrypto.randomIv()
+        // Resume support: reuse the stored IV on a retry so the re-encryption
+        // produces the identical ciphertext and uploaded parts can be skipped.
+        val storedIv = entry.chunkIvs.split(',').firstOrNull()?.trim().orEmpty()
+        val iv = if (storedIv.isNotEmpty()) Base64.decode(storedIv, Base64.NO_WRAP)
+        else BackupCrypto.randomIv()
         val base = entry.contentHash.take(16)
         // Single pass: encrypt straight into rotating part files, so the temp
         // footprint is ~1x the file size instead of ~2x (no full-size .enc
@@ -183,7 +279,15 @@ class BackupEngine(private val context: Context) {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 sink.use { out -> BackupCrypto.encryptStream(key, iv, input, out) }
             } ?: throw TdException(0, "cannot read local file")
-            uploadParts(chatId, partFiles, sink.checksums, entry, iv, threadId)
+            val iv64 = Base64.encodeToString(iv, Base64.NO_WRAP)
+            // Persist IV + checksums before uploading so an interrupted run
+            // (reboot, process death, network loss) can resume part-wise.
+            if (entry.chunkIvs.isBlank() || entry.partChecksums.isBlank()) {
+                db.dao().setUploadStart(
+                    entry.contentHash, iv64, sink.checksums.joinToString(",")
+                )
+            }
+            uploadParts(chatId, partFiles, sink.checksums, entry, iv64, threadId, onPartProgress)
         } finally {
             partFiles.forEach { it.delete() }
         }
@@ -194,20 +298,37 @@ class BackupEngine(private val context: Context) {
         parts: List<File>,
         checksums: List<String>,
         entry: BackupEntry,
-        iv: ByteArray,
-        threadId: Long? = null
+        iv64: String,
+        threadId: Long? = null,
+        onPartProgress: (uploadedInFile: Long, fileBytes: Long) -> Unit = { _, _ -> }
     ) {
         val captionBase = entry.contentHash.take(12) + " " + entry.name
-        val messageIds = parts.mapIndexed { i, part ->
+        // Positional list of already-uploaded part message ids (resume support).
+        val prior = entry.uploadedPartIds.split(',').map { it.trim() }
+        val partIds = MutableList(parts.size) { i -> prior.getOrNull(i).orEmpty() }
+        var offset = 0L
+        parts.forEachIndexed { i, part ->
+            val base = offset
+            offset += part.length()
+            if (partIds[i].isNotBlank()) {
+                // Already uploaded by an earlier run: count its bytes and skip.
+                onPartProgress(offset, entry.sizeBytes)
+                return@forEachIndexed
+            }
             val caption = if (parts.size == 1) captionBase
                 else "$captionBase [part ${i + 1}/${parts.size}]"
-            td.uploadDocument(chatId, part.absolutePath, caption, threadId).id
+            val id = td.uploadDocument(chatId, part.absolutePath, caption, threadId) { up, _ ->
+                onPartProgress(base + up, entry.sizeBytes)
+            }.id
+            partIds[i] = id.toString()
+            // Persist immediately so a crash after this point skips this part.
+            db.dao().setUploadedPartIds(entry.contentHash, partIds.joinToString(","))
         }
         db.dao().markUploadedWithChecksums(
             entry.contentHash,
             BackupEntry.BACKED_UP,
-            messageIds.joinToString(","),
-            Base64.encodeToString(iv, Base64.NO_WRAP),
+            partIds.joinToString(","),
+            iv64,
             checksums.joinToString(","),
             System.currentTimeMillis()
         )

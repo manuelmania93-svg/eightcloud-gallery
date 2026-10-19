@@ -47,6 +47,17 @@ class TdClient private constructor(private val appContext: Context) {
     private val authWatchers = ConcurrentHashMap.newKeySet<(TdApi.AuthorizationState) -> Unit>()
     private val pendingUploads = ConcurrentHashMap<Long, CompletableDeferred<TdApi.Message>>()
 
+    /** fileId -> (uploadedBytes, expectedBytes) callback while an upload runs. */
+    private val fileWatchers = ConcurrentHashMap<Int, (Long, Long) -> Unit>()
+
+    fun addFileWatcher(fileId: Int, callback: (Long, Long) -> Unit) {
+        fileWatchers[fileId] = callback
+    }
+
+    fun removeFileWatcher(fileId: Int) {
+        fileWatchers.remove(fileId)
+    }
+
     @Volatile
     private var savedMessagesChatId: Long = 0
 
@@ -87,6 +98,10 @@ class TdClient private constructor(private val appContext: Context) {
                     else -> {}
                 }
                 authWatchers.forEach { it(state) }
+            }
+            is TdApi.UpdateFile -> {
+                val f = update.file
+                fileWatchers[f.id]?.invoke(f.remote?.uploadedSize ?: 0L, f.expectedSize)
             }
             is TdApi.UpdateMessageSendSucceeded -> {
                 pendingUploads.remove(update.oldMessageId)?.complete(update.message)
@@ -177,7 +192,13 @@ class TdClient private constructor(private val appContext: Context) {
     }
 
     /** Sends an encrypted file as a document; completes when Telegram confirms the upload. */
-    suspend fun uploadDocument(chatId: Long, filePath: String, caption: String, threadId: Long? = null): TdApi.Message =
+    suspend fun uploadDocument(
+        chatId: Long,
+        filePath: String,
+        caption: String,
+        threadId: Long? = null,
+        onProgress: ((uploadedBytes: Long, expectedBytes: Long) -> Unit)? = null
+    ): TdApi.Message =
         withContext(Dispatchers.Default) {
             val content = TdApi.InputMessageDocument(
                 TdApi.InputDocument(TdApi.InputFileLocal(filePath), null, false),
@@ -187,9 +208,12 @@ class TdClient private constructor(private val appContext: Context) {
             val sent = send(TdApi.SendMessage(chatId, topic, null, null, null, content))
             val deferred = CompletableDeferred<TdApi.Message>()
             pendingUploads[sent.id] = deferred
+            val fileId = (sent.content as? TdApi.MessageDocument)?.document?.document?.id ?: 0
+            if (onProgress != null && fileId != 0) addFileWatcher(fileId, onProgress)
             try {
                 kotlinx.coroutines.withTimeout(30L * 60 * 1000) { deferred.await() }
             } finally {
+                if (fileId != 0) removeFileWatcher(fileId)
                 pendingUploads.remove(sent.id)
             }
         }

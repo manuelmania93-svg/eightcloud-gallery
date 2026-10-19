@@ -18,6 +18,9 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.eightcloud.gallery.telegram.TdClient
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import java.util.concurrent.TimeUnit
 
@@ -34,20 +37,37 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         app.eightcloud.gallery.AppLog.log("backup", "worker start (manual=" + manual + ")")
         return try {
             setForegroundAsync(foregroundInfo(0, 0, "Preparing backup..."))
-            val engine = BackupEngine(applicationContext)
-            engine.scan(ids)
-            engine.uploadPending(ids) { done, total, _, _, name ->
-                val text = if (total > 0) "$done of $total - $name" else "Scanning..."
-                setProgressAsync(
-                    Data.Builder()
-                        .putInt(KEY_DONE, done)
-                        .putInt(KEY_TOTAL, total)
-                        .putString(KEY_NAME, name)
-                        .build()
-                )
-                setForegroundAsync(foregroundInfo(done, total, text))
+            coroutineScope {
+                // The engine pushes fine-grained progress (per-part bytes,
+                // speed, ETA, pause state); this collector owns the notification.
+                val notifier = launch {
+                    var lastPosted = 0L
+                    BackupProgress.state.conflate().collect { s ->
+                        val now = System.currentTimeMillis()
+                        // Post at most once per second; the system caps us anyway.
+                        if (s.running && now - lastPosted >= 1_000) {
+                            lastPosted = now
+                            setForegroundAsync(foregroundInfo(s))
+                        }
+                    }
+                }
+                try {
+                    val engine = BackupEngine(applicationContext)
+                    engine.scan(ids)
+                    engine.uploadPending(ids) { done, total, _, _, name ->
+                        setProgressAsync(
+                            Data.Builder()
+                                .putInt(KEY_DONE, done)
+                                .putInt(KEY_TOTAL, total)
+                                .putString(KEY_NAME, name)
+                                .build()
+                        )
+                    }
+                    engine.exportIndex()
+                } finally {
+                    notifier.cancel()
+                }
             }
-            engine.exportIndex()
             notifyManager().cancel(NOTIFICATION_ID)
             Result.success()
         } catch (e: Exception) {
@@ -71,6 +91,47 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             .setContentText(text)
             .setProgress(total, done, total == 0)
             .setOngoing(true)
+            .build()
+        return ForegroundInfo(
+            NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
+    }
+
+    /** Live notification with per-byte progress, speed, ETA and a pause action. */
+    private fun foregroundInfo(s: BackupProgress.State): ForegroundInfo {
+        val channelId = "backup_progress"
+        val channel = NotificationChannel(channelId, "Cloud backup", NotificationManager.IMPORTANCE_LOW)
+        notifyManager().createNotificationChannel(channel)
+        val title = if (s.paused) "8CloudGallery backup (paused)" else "8CloudGallery backup"
+        val line1 = "${s.done} of ${s.total} - ${s.currentName}"
+        val parts = mutableListOf<String>()
+        if (s.bytesPerSec > 0) parts.add(BackupProgress.formatSpeed(s.bytesPerSec))
+        val eta = BackupProgress.formatEta(s.etaSeconds)
+        if (eta.isNotEmpty()) parts.add(eta + " left")
+        val line2 = parts.joinToString(" - ")
+        val toggleIntent = android.app.PendingIntent.getBroadcast(
+            applicationContext, 0,
+            android.content.Intent(applicationContext, BackupControlReceiver::class.java)
+                .setAction(BackupControlReceiver.ACTION_TOGGLE_PAUSE),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val maxBytes = if (s.bytesTotal > 0) 1_000 else 0
+        val curBytes = if (s.bytesTotal > 0)
+            ((s.bytesDone * 1_000) / s.bytesTotal).toInt() else 0
+        val notification: Notification = NotificationCompat.Builder(applicationContext, channelId)
+            .setSmallIcon(
+                if (s.paused) android.R.drawable.ic_media_pause
+                else android.R.drawable.stat_sys_upload
+            )
+            .setContentTitle(title)
+            .setContentText(line1)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                if (line2.isEmpty()) line1 else line1 + "\n" + line2
+            ))
+            .setProgress(maxBytes, curBytes, s.bytesTotal <= 0)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .addAction(0, if (s.paused) "Resume" else "Pause", toggleIntent)
             .build()
         return ForegroundInfo(
             NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC

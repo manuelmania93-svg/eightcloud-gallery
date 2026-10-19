@@ -9,6 +9,7 @@ import app.eightcloud.gallery.backup.BackupDb
 import app.eightcloud.gallery.backup.BackupEngine
 import app.eightcloud.gallery.backup.BackupWorker
 import app.eightcloud.gallery.backup.BackupEntry
+import app.eightcloud.gallery.backup.BackupControl
 import app.eightcloud.gallery.backup.BackupProgress
 import app.eightcloud.gallery.data.MediaStoreSource
 import app.eightcloud.gallery.telegram.TdClient
@@ -61,6 +62,10 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
     val availableBuckets: StateFlow<List<String>> = _availableBuckets
 
     val progress: StateFlow<BackupProgress.State> = BackupProgress.state
+
+    fun toggleUploadPause() {
+        BackupControl.setPaused(getApplication(), !BackupControl.isPaused(getApplication()))
+    }
 
     private val _failed = MutableStateFlow<List<BackupEntry>>(emptyList())
     val failed: StateFlow<List<BackupEntry>> = _failed

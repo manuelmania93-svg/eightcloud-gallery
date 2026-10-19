@@ -30,7 +30,8 @@ data class BackupEntry(
     val uploadedAt: Long,
     val lastSeenAt: Long,
     val errorMessage: String = "",
-    val partChecksums: String = "" // comma-separated SHA-256 hex, one per part
+    val partChecksums: String = "", // comma-separated SHA-256 hex, one per part
+    val uploadedPartIds: String = "" // comma-separated telegram message ids, positional per part; blank = not yet uploaded
 ) {
     companion object {
         const val PENDING = "PENDING"
@@ -79,6 +80,12 @@ interface BackupDao {
 
     @Query("UPDATE backup_index SET status = 'PENDING', errorMessage = '' WHERE status = 'FAILED'")
     suspend fun resetFailed(): Int
+
+    @Query("UPDATE backup_index SET chunkIvs = :ivs, partChecksums = :checksums WHERE contentHash = :hash")
+    suspend fun setUploadStart(hash: String, ivs: String, checksums: String)
+
+    @Query("UPDATE backup_index SET uploadedPartIds = :partIds WHERE contentHash = :hash")
+    suspend fun setUploadedPartIds(hash: String, partIds: String)
 
     @Query("SELECT * FROM backup_index WHERE status = 'PENDING' AND mediaStoreId IN (:ids)")
     suspend fun pendingByIds(ids: List<Long>): List<BackupEntry>
@@ -163,7 +170,7 @@ interface GeoDao {
     suspend fun locatedCount(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class], version = 6, exportSchema = false)
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class], version = 7, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
@@ -207,6 +214,12 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE backup_index ADD COLUMN uploadedPartIds TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -226,7 +239,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it }
         }
     }
 }
