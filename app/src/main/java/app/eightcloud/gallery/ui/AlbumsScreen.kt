@@ -29,7 +29,11 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AlbumsScreen(viewModel: GalleryViewModel) {
     val bucketCounts by viewModel.bucketCounts.collectAsState()
+    val smartAlbums by viewModel.smartAlbums.collectAsState()
+    val monthAlbums by viewModel.monthAlbums.collectAsState()
+    val featureToggles by viewModel.featureToggles.collectAsState()
     val buckets = bucketCounts.entries.sortedByDescending { it.value }
+    val showAuto = featureToggles["feat_auto_albums"] != false
 
     Scaffold(topBar = { TopAppBar(title = { Text("Albums") }) }) { innerPadding ->
         LazyColumn(
@@ -37,34 +41,93 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            items(buckets, key = { it.key }) { entry ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewModel.setBucketFilter(entry.key)
+            if (showAuto && smartAlbums.isNotEmpty()) {
+                item(key = "hdr-smart") {
+                    Text(
+                        "Smart albums",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+                items(smartAlbums, key = { it.key }) { album ->
+                    AlbumRow(
+                        title = album.title,
+                        count = album.count,
+                        onClick = {
+                            viewModel.setSmartFilter(album.key)
                             viewModel.backToGrid()
                         }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Folder,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
                     )
-                    Column(modifier = Modifier.padding(start = 12.dp)) {
-                        Text(entry.key, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "${entry.value} items",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    HorizontalDivider()
                 }
+            }
+            if (showAuto && monthAlbums.isNotEmpty()) {
+                item(key = "hdr-months") {
+                    Text(
+                        "By month",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+                items(monthAlbums, key = { it.key }) { album ->
+                    AlbumRow(
+                        title = album.title,
+                        count = album.count,
+                        onClick = {
+                            viewModel.setSmartFilter(album.key)
+                            viewModel.backToGrid()
+                        }
+                    )
+                    HorizontalDivider()
+                }
+            }
+            item(key = "hdr-folders") {
+                Text(
+                    "Folders",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+            items(buckets, key = { it.key }) { entry ->
+                AlbumRow(
+                    title = entry.key,
+                    count = entry.value,
+                    onClick = {
+                        viewModel.setBucketFilter(entry.key)
+                        viewModel.backToGrid()
+                    }
+                )
                 HorizontalDivider()
             }
+        }
+    }
+}
+
+@Composable
+private fun AlbumRow(title: String, count: Int, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Folder,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(28.dp)
+        )
+        Column(modifier = Modifier.padding(start = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                "$count items",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

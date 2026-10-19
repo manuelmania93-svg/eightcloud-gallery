@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -114,6 +115,7 @@ import java.time.ZoneId
 internal sealed class GridEntry(val key: String) {
     class Header(val title: String, var count: Int = 0) : GridEntry("header-$title")
     class Media(val item: MediaItem) : GridEntry("media-${item.id}")
+    class Memories(val items: List<MediaItem>) : GridEntry("memories")
 }
 
 internal fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEntry> {
@@ -171,6 +173,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
     val favorites by viewModel.favorites.collectAsState()
     val statusById by viewModel.statusById.collectAsState()
     val bucketFilter by viewModel.bucketFilter.collectAsState()
+    val smartFilter by viewModel.smartFilter.collectAsState()
 
     androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshBackupStatus() }
     var sortMenuOpen by remember { mutableStateOf(false) }
@@ -270,6 +273,23 @@ fun GridScreen(viewModel: GalleryViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            if (smartFilter != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .clickable { viewModel.setSmartFilter(null) }
+                ) {
+                    Text(
+                        text = "Album: ${viewModel.smartTitle(smartFilter!!)}  ✕",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
             if (bucketFilter != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -347,11 +367,13 @@ fun GridScreen(viewModel: GalleryViewModel) {
                         when (it) {
                             is GridEntry.Header -> "header"
                             is GridEntry.Media -> "media"
+                            is GridEntry.Memories -> "memories"
                         }
                     }, span = {
                         when (it) {
                             is GridEntry.Header -> GridItemSpan(maxLineSpan)
                             is GridEntry.Media -> GridItemSpan(1)
+                            is GridEntry.Memories -> GridItemSpan(maxLineSpan)
                         }
                     }) { entry ->
                         when (entry) {
@@ -389,6 +411,13 @@ fun GridScreen(viewModel: GalleryViewModel) {
                                     }
                                 },
                                 onLongClick = { viewModel.toggleSelect(entry.item.id) }
+                            )
+                            is GridEntry.Memories -> MemoriesCard(
+                                memories = entry.items,
+                                onOpen = { item ->
+                                    val index = items.indexOfFirst { it.id == item.id }
+                                    if (index >= 0) viewModel.openViewer(index)
+                                }
                             )
                         }
                     }
@@ -634,6 +663,7 @@ private val fullDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("
 
 private fun bubbleLabelOf(entry: GridEntry?, field: SortField): String = when (entry) {
     is GridEntry.Header -> entry.title
+    is GridEntry.Memories -> "On this day"
     is GridEntry.Media -> when (field) {
         SortField.DATE -> Instant.ofEpochMilli(entry.item.dateMillis)
             .atZone(ZoneId.systemDefault()).toLocalDate().format(fullDateFormatter)
@@ -642,6 +672,46 @@ private fun bubbleLabelOf(entry: GridEntry?, field: SortField): String = when (e
     }
     null -> ""
 }
+@Composable
+private fun MemoriesCard(memories: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .padding(4.dp)
+            .fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                "On this day",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            androidx.compose.foundation.lazy.LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                items(memories.size) { i ->
+                    val m = memories[i]
+                    AsyncImage(
+                        model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                            .data(m.uri)
+                            .size(256, 256)
+                            .build(),
+                        contentDescription = m.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(76.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onOpen(m) }
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaThumb(

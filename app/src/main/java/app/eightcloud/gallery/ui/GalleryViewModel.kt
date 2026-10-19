@@ -23,6 +23,29 @@ enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
 enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
+data class SmartAlbum(val key: String, val title: String, val count: Int)
+
+internal fun monthTitle(yearMonth: String): String = runCatching {
+    java.time.YearMonth.parse(yearMonth)
+        .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+}.getOrDefault(yearMonth)
+
+internal fun matchesSmartAlbum(item: MediaItem, key: String): Boolean {
+    val b = item.bucket.lowercase()
+    return when {
+        key == "screenshots" -> b.contains("screenshot")
+        key == "videos" -> item.isVideo
+        key == "camera" -> b.contains("camera") || b.contains("dcim")
+        key == "memes" -> b.contains("meme")
+        key.startsWith("month:") ->
+            java.time.Instant.ofEpochMilli(item.dateMillis)
+                .atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM")) ==
+                key.removePrefix("month:")
+        else -> true
+    }
+}
+
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
@@ -41,7 +64,70 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun setBucketFilter(bucket: String?) {
         _bucketFilter.value = bucket
+        if (bucket != null) _smartFilter.value = null
         applyView()
+    }
+
+    // Smart albums (screenshots/videos/camera/memes) and by-month albums.
+    private val _smartFilter = MutableStateFlow<String?>(null)
+    val smartFilter: StateFlow<String?> = _smartFilter
+
+    fun setSmartFilter(key: String?) {
+        _smartFilter.value = key
+        if (key != null) _bucketFilter.value = null
+        applyView()
+    }
+
+    fun smartTitle(key: String): String = when {
+        key.startsWith("month:") -> monthTitle(key.removePrefix("month:"))
+        key == "screenshots" -> "Screenshots"
+        key == "videos" -> "Videos"
+        key == "camera" -> "Camera"
+        key == "memes" -> "Memes"
+        else -> key
+    }
+
+    private val _smartAlbums = MutableStateFlow<List<SmartAlbum>>(emptyList())
+    val smartAlbums: StateFlow<List<SmartAlbum>> = _smartAlbums
+
+    private val _monthAlbums = MutableStateFlow<List<SmartAlbum>>(emptyList())
+    val monthAlbums: StateFlow<List<SmartAlbum>> = _monthAlbums
+
+    // "On this day": same month-day in earlier years, newest first.
+    private val _memories = MutableStateFlow<List<MediaItem>>(emptyList())
+    val memories: StateFlow<List<MediaItem>> = _memories
+
+    private fun computeAlbumsAndMemories() {
+        val source = allItems
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                val zone = java.time.ZoneId.systemDefault()
+                val monthFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM")
+                val smart = listOf(
+                    SmartAlbum("screenshots", "Screenshots",
+                        source.count { it.bucket.lowercase().contains("screenshot") }),
+                    SmartAlbum("videos", "Videos", source.count { it.isVideo }),
+                    SmartAlbum("camera", "Camera",
+                        source.count { it.bucket.lowercase().let { b -> b.contains("camera") || b.contains("dcim") } }),
+                    SmartAlbum("memes", "Memes",
+                        source.count { it.bucket.lowercase().contains("meme") })
+                ).filter { it.count > 0 }
+                val months = source
+                    .groupBy { java.time.Instant.ofEpochMilli(it.dateMillis).atZone(zone).format(monthFmt) }
+                    .map { (m, l) -> SmartAlbum("month:$m", monthTitle(m), l.size) }
+                    .sortedByDescending { it.key }
+                val today = java.time.LocalDate.now(zone)
+                val mem = source.filter {
+                    val d = java.time.Instant.ofEpochMilli(it.dateMillis).atZone(zone).toLocalDate()
+                    d.monthValue == today.monthValue && d.dayOfMonth == today.dayOfMonth &&
+                        d.year < today.year
+                }.sortedByDescending { it.dateMillis }.take(10)
+                Triple(smart, months, mem)
+            }
+            _smartAlbums.value = result.first
+            _monthAlbums.value = result.second
+            _memories.value = result.third
+        }
     }
 
     // Trash: ids mapped to the time they were trashed; kept 30 days (app-level).
@@ -215,6 +301,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             allItems = result
             app.eightcloud.gallery.AppLog.log("media", "loaded " + result.size + " items")
+            computeAlbumsAndMemories()
             _bucketCounts.value = result.groupingBy { it.bucket.ifBlank { "Other" } }.eachCount()
             refreshTrashItems()
             computeDuplicates()
@@ -415,12 +502,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val field = _sortField.value
         val ascending = _sortAscending.value
         val statusMap = _statusById.value
+        val smart = _smartFilter.value
+        val memoriesEnabled = _featureToggles.value["feat_on_this_day"] != false
+        val memories = _memories.value
         val source = allItems
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 val base = if (trashed.isEmpty()) source else source.filter { !trashed.containsKey(it.id) }
                 var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
+                if (smart != null) view = view.filter { matchesSmartAlbum(it, smart) }
                 if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
                 if (videosOnly) view = view.filter { it.isVideo }
                 if (query.isNotEmpty()) {
@@ -448,7 +539,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 val sorted = view.sortedWith(MediaSort.comparator(field, ascending))
-                val entries = buildEntries(sorted, field)
+                var entries = buildEntries(sorted, field)
+                val unfiltered = bucketFilter == null && smart == null && query.isEmpty() &&
+                    statusFilter == StatusFilter.ALL && !favoritesOnly && !videosOnly
+                if (field == SortField.DATE && unfiltered && memoriesEnabled && memories.isNotEmpty()) {
+                    entries = listOf(GridEntry.Memories(memories)) + entries
+                }
                 val active = base
                 val counts = mapOf(
                     StatusFilter.ALL to active.size,
