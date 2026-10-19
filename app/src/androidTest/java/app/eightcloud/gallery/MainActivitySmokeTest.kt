@@ -53,7 +53,7 @@ class MainActivitySmokeTest {
 
     @Test
     fun sortButtonOpensSortMenu() {
-        composeRule.onNodeWithContentDescription("Sort").performClick()
+        composeRule.onNodeWithText("Sort: Date", substring = true).performClick()
         composeRule.waitUntil(timeoutMillis = 5000) {
             composeRule.onAllNodesWithText("Date (newest first)", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
