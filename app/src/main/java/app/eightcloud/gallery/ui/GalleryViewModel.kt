@@ -366,6 +366,21 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         if (_favoritesOnly.value) applyView()
     }
 
+    /** Test hook: reset every persisted view-state value to its default. */
+    fun resetViewStateForTest() {
+        _searchQuery.value = ""
+        _favoritesOnly.value = false
+        _videosOnly.value = false
+        _statusFilter.value = StatusFilter.ALL
+        _bucketFilter.value = null
+        _smartFilter.value = null
+        _sortField.value = SortField.DATE
+        _sortAscending.value = false
+        gridAnchorId = null
+        gridAnchorOffset = 0
+        applyView()
+    }
+
     fun openViewer(index: Int) {
         _viewerStartIndex.value = index.coerceAtLeast(0)
         _screen.value = Screen.VIEWER

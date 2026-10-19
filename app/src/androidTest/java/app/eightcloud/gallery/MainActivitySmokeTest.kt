@@ -47,10 +47,16 @@ class MainActivitySmokeTest {
 
     @org.junit.Before
     fun clearPrefs() {
-        // Filters and grid position now persist; isolate each test.
+        // Filters and grid position now persist; isolate each test. The
+        // activity (and its ViewModel) is launched by the rule BEFORE this
+        // runs, so the live ViewModel must be reset too - clearing prefs
+        // alone leaves the stale filter active in memory.
         InstrumentationRegistry.getInstrumentation().targetContext
             .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
             .edit().clear().commit()
+        composeRule.activityRule.scenario.onActivity { activity ->
+            ViewModelProvider(activity)[GalleryViewModel::class.java].resetViewStateForTest()
+        }
     }
 
     @Test
