@@ -474,10 +474,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 pending.take(25).forEach { item ->
                     runCatching {
                         scanner.scan(item.id, android.net.Uri.parse(item.uri))
-                    }?.let { entry ->
-                        if (entry != null) {
-                            _mediaLabels.value = _mediaLabels.value + (entry.mediaStoreId to entry)
-                        }
+                    }.getOrNull()?.let { entry ->
+                        _mediaLabels.value = _mediaLabels.value + (entry.mediaStoreId to entry)
                     }
                 }
                 computeCategoryAlbums()
