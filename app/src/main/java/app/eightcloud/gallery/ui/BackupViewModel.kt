@@ -270,6 +270,13 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         refreshCounts()
     }
 
+    fun rebuildFromCloud() = guard {
+        val imported = engine.rebuildIndexFromCloud()
+        _error.value = if (imported == 0) "No cloud backups found to rebuild from"
+        else "Rebuilt $imported cloud entries - they won't upload again"
+        refreshCounts()
+    }
+
     fun refreshCounts() {
         viewModelScope.launch {
             val (backed, pending) = withContext(Dispatchers.IO) { engine.counts() }

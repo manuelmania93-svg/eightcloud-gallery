@@ -53,6 +53,12 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 }
                 try {
                     val engine = BackupEngine(applicationContext)
+                    // Fresh install with an existing cloud destination: rebuild
+                    // dedupe rows from captions before scanning, so already
+                    // uploaded files are not uploaded again.
+                    if (ids == null && engine.isIndexEmpty()) {
+                        engine.rebuildIndexFromCloud()
+                    }
                     engine.scan(ids)
                     engine.uploadPending(ids) { done, total, _, _, name ->
                         setProgressAsync(

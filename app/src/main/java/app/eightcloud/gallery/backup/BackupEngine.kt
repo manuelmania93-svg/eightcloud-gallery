@@ -109,7 +109,25 @@ class BackupEngine(private val context: Context) {
             val hash = context.contentResolver.openInputStream(Uri.parse(item.uri))?.use {
                 Hasher.sha256Hex(it)
             } ?: continue
-            if (db.dao().byHash(hash) != null) continue
+            // Prefix match covers both full local hashes and the 12-char
+            // prefixes recovered from cloud captions after a reinstall.
+            val existing = db.dao().byHashPrefix(hash.take(12))
+            if (existing != null) {
+                // Rebuilt cloud rows start with mediaStoreId 0: adopt the real
+                // local id so later scans skip the hash pass for this file.
+                if (existing.mediaStoreId == 0L) {
+                    db.dao().upsert(
+                        existing.copy(
+                            mediaStoreId = item.id,
+                            name = item.name,
+                            sizeBytes = item.sizeBytes,
+                            isVideo = item.isVideo,
+                            lastSeenAt = now
+                        )
+                    )
+                }
+                continue
+            }
             db.dao().upsert(
                 BackupEntry(
                     contentHash = hash,
@@ -513,6 +531,10 @@ class BackupEngine(private val context: Context) {
         missing
     }
 
+    suspend fun isIndexEmpty(): Boolean = withContext(Dispatchers.IO) {
+        db.dao().rowCount() == 0
+    }
+
     suspend fun counts(): Pair<Int, Int> {
         val backed = db.dao().backedUpCount()
         val pending = db.dao().byStatus(BackupEntry.PENDING).size
@@ -522,7 +544,77 @@ class BackupEngine(private val context: Context) {
     data class RestoreResult(val restored: Int, val failed: Int)
 
     suspend fun cloudOnlyEntries(): List<BackupEntry> = withContext(Dispatchers.IO) {
-        db.dao().all().filter { it.status == BackupEntry.CLOUD_ONLY }
+        db.dao().all().filter { it.status == BackupEntry.CLOUD_ONLY && it.chunkIvs.isNotBlank() }
+    }
+
+    /**
+     * Rebuilds index rows from backup captions found in the destination chat.
+     * Fallback for a reinstall without an index export: matching files are
+     * skipped on the next scan instead of being uploaded again. Entries
+     * rebuilt this way carry no encryption IV, so they are dedupe-only and
+     * never offered for restore (chunkIvs stays blank).
+     * Returns the number of files imported.
+     */
+    suspend fun rebuildIndexFromCloud(maxPages: Int = 20): Int = withContext(Dispatchers.IO) {
+        val captionRe = Regex("^([0-9a-f]{12}) (.+?)(?: \[part (\d+)/(\d+)\])?$")
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val chatId = destinationChat()
+        val toGroup = prefs.getLong("destChatId", 0L) != 0L
+        val topics = if (toGroup) listOfNotNull(
+            prefs.getLong("topicPics", 0L).takeIf { it != 0L }?.toInt(),
+            prefs.getLong("topicVids", 0L).takeIf { it != 0L }?.toInt()
+        ) else listOf(null)
+        // hashPrefix -> (name, sorted part message ids, latest date, biggest size)
+        data class Acc(var name: String, val ids: MutableList<Long>, var date: Long, var size: Long, var isVideo: Boolean)
+        val found = HashMap<String, Acc>()
+        for (topic in (if (toGroup) topics else listOf(null))) {
+            var fromId = 0L
+            var rounds = 0
+            while (rounds < maxPages) {
+                val page = if (topic != null) td.forumTopicHistory(chatId, topic, fromId, 100)
+                else td.chatHistory(chatId, fromId, 100)
+                if (page.messages.isEmpty()) break
+                for (message in page.messages) {
+                    val content = message.content as? TdApi.MessageDocument ?: continue
+                    val doc = content.document
+                    val captionText = content.caption?.text ?: ""
+                    if (captionText.isEmpty()) continue
+                    val m = captionRe.find(captionText) ?: continue
+                    val prefix = m.groupValues[1]
+                    val name = m.groupValues[2]
+                    val part = m.groupValues[3].toIntOrNull() ?: 1
+                    val acc = found.getOrPut(prefix) { Acc(name, mutableListOf(), 0L, 0L, false) }
+                    while (acc.ids.size < part) acc.ids.add(0L)
+                    acc.ids[part - 1] = message.id
+                    acc.date = maxOf(acc.date, message.date.toLong() * 1000)
+                    acc.size += doc.document.size
+                }
+                fromId = page.messages.last().id
+                rounds++
+            }
+        }
+        var imported = 0
+        val now = System.currentTimeMillis()
+        for ((prefix, acc) in found) {
+            if (db.dao().byHashPrefix(prefix) != null) continue
+            db.dao().upsert(
+                BackupEntry(
+                    contentHash = prefix,
+                    mediaStoreId = 0,
+                    name = acc.name,
+                    sizeBytes = acc.size,
+                    isVideo = acc.isVideo,
+                    status = BackupEntry.CLOUD_ONLY,
+                    telegramMessageIds = acc.ids.filter { it != 0L }.joinToString(","),
+                    chunkIvs = "",
+                    uploadedAt = acc.date,
+                    lastSeenAt = now
+                )
+            )
+            imported++
+        }
+        app.eightcloud.gallery.AppLog.log("backup", "cloud rebuild: " + imported + " files imported from captions")
+        imported
     }
 
     suspend fun restore(

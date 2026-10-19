@@ -450,6 +450,12 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                             .fillMaxWidth()
                             .padding(top = 8.dp)
                     ) { Text("Import index from cloud") }
+                    OutlinedButton(
+                        onClick = { viewModel.rebuildFromCloud() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                    ) { Text("Find files already in the cloud") }
                 }
                 is TdApi.AuthorizationStateWaitPhoneNumber, null -> {
                     if (viewModel.credentialsMissing) {

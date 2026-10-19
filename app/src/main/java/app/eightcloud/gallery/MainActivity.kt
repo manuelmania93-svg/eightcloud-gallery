@@ -59,6 +59,25 @@ import app.eightcloud.gallery.ui.ThemeMode
 import app.eightcloud.gallery.ui.ViewerScreen
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
+
+    /** Re-locks the app (when app lock is on) as soon as the screen turns off. */
+    private val screenOffReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action != android.content.Intent.ACTION_SCREEN_OFF) return
+            val lockOn = getSharedPreferences("settings", MODE_PRIVATE)
+                .getBoolean("appLock", false)
+            if (lockOn) {
+                androidx.lifecycle.ViewModelProvider(this@MainActivity)[app.eightcloud.gallery.ui.GalleryViewModel::class.java]
+                    .lockApp()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(screenOffReceiver) }
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CrashLogger.install(this)
@@ -74,6 +93,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 if (level >= TRIM_MEMORY_RUNNING_LOW) AppLog.log("memory", "onTrimMemory level=" + level)
             }
         })
+        registerReceiver(
+            screenOffReceiver,
+            android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF)
+        )
         enableEdgeToEdge()
         // VideoFrameDecoder so video thumbnails actually render in the grid.
         Coil.setImageLoader(
@@ -114,9 +137,18 @@ fun EightCloudApp() {
     val themeMode by viewModel.themeMode.collectAsState()
     val appLock by viewModel.appLock.collectAsState()
     val appUnlocked by viewModel.appUnlocked.collectAsState()
+    val privacyScreen by viewModel.privacyScreen.collectAsState()
     val permissionGranted by viewModel.permissionGranted.collectAsState()
     val screen by viewModel.screen.collectAsState()
     val context = LocalContext.current
+
+    // Privacy screen: hides the app in recents and blocks screenshots.
+    LaunchedEffect(privacyScreen) {
+        (context as? android.app.Activity)?.window?.let { w ->
+            if (privacyScreen) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()

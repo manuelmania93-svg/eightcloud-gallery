@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -49,6 +50,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val trashItems by viewModel.trashItems.collectAsState()
     val duplicateGroups by viewModel.duplicateGroups.collectAsState()
     val appLock by viewModel.appLock.collectAsState()
+    val privacyScreen by viewModel.privacyScreen.collectAsState()
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
@@ -127,6 +129,33 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             androidx.compose.material3.Switch(
                 checked = appLock,
                 onCheckedChange = { viewModel.setAppLock(it) }
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.setPrivacyScreen(!privacyScreen) }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VisibilityOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text("Privacy screen", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Hide app content in recent apps and block screenshots",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = privacyScreen,
+                onCheckedChange = { viewModel.setPrivacyScreen(it) }
             )
         }
 

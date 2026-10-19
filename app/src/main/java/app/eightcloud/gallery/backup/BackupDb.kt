@@ -54,6 +54,9 @@ interface BackupDao {
     @Query("SELECT * FROM backup_index WHERE contentHash = :hash")
     suspend fun byHash(hash: String): BackupEntry?
 
+    @Query("SELECT * FROM backup_index WHERE contentHash LIKE :prefix || '%' LIMIT 1")
+    suspend fun byHashPrefix(prefix: String): BackupEntry?
+
     @Query("SELECT * FROM backup_index WHERE mediaStoreId = :mediaStoreId")
     suspend fun byMediaStoreId(mediaStoreId: Long): BackupEntry?
 
@@ -71,6 +74,9 @@ interface BackupDao {
 
     @Query("SELECT COUNT(*) FROM backup_index WHERE status = 'BACKED_UP' OR status = 'CLOUD_ONLY'")
     suspend fun backedUpCount(): Int
+
+    @Query("SELECT COUNT(*) FROM backup_index")
+    suspend fun rowCount(): Int
 
     @Query("UPDATE backup_index SET status = 'FAILED', errorMessage = :message WHERE contentHash = :hash")
     suspend fun markFailed(hash: String, message: String)

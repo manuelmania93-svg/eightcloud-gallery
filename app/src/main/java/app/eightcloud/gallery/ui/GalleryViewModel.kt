@@ -725,6 +725,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun unlockApp() { _appUnlocked.value = true }
 
+    /** Re-locks the app (screen off). No-op state change when lock is off. */
+    fun lockApp() { _appUnlocked.value = false }
+
+    private val _privacyScreen = MutableStateFlow(prefs.getBoolean("privacyScreen", true))
+    val privacyScreen: StateFlow<Boolean> = _privacyScreen
+
+    fun setPrivacyScreen(enabled: Boolean) {
+        _privacyScreen.value = enabled
+        prefs.edit().putBoolean("privacyScreen", enabled).apply()
+    }
+
     /** Test hook: loads synthetic items without MediaStore (debug builds only). */
     fun loadSyntheticForTest(count: Int) {
         if (!app.eightcloud.gallery.BuildConfig.DEBUG) return
