@@ -41,6 +41,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -258,7 +259,6 @@ private fun PhotoPage(item: MediaItem) {
     }
 }
 
-@Composable
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 private fun VideoPage(item: MediaItem, isActive: Boolean, onEnded: () -> Unit = {}) {
@@ -292,11 +292,11 @@ private fun VideoPage(item: MediaItem, isActive: Boolean, onEnded: () -> Unit = 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { ctx ->
-                androidx.media3.ui.StyledPlayerView(ctx).apply {
+                androidx.media3.ui.PlayerView(ctx).apply {
                     this.player = player
                     useController = true
                     controllerAutoShow = true
-                    setShowBuffering(androidx.media3.ui.StyledPlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                 }
             },
             modifier = Modifier.fillMaxSize()

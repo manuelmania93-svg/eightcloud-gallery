@@ -50,7 +50,7 @@ private fun SlideshowVideo(item: app.eightcloud.gallery.data.MediaItem, onEnded:
     }
     androidx.compose.ui.viewinterop.AndroidView(
         factory = { ctx ->
-            androidx.media3.ui.StyledPlayerView(ctx).apply {
+            androidx.media3.ui.PlayerView(ctx).apply {
                 this.player = player
                 useController = false
             }
