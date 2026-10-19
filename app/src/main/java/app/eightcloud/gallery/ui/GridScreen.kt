@@ -563,6 +563,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
                 .pointerInput(total, trackHeightPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        app.eightcloud.gallery.AppLog.log("slider", "drag start, total=" + total)
                         onDraggingChange(true)
                         dragOffsetPx = (down.position.y - thumbHeightPx / 2f).coerceIn(0f, trackHeightPx)
                         pendingIndex = ((dragOffsetPx!! / trackHeightPx) * (total - 1))
@@ -579,6 +580,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
                             }
                         }
                         val finalIndex = pendingIndex
+                        app.eightcloud.gallery.AppLog.log("slider", "drag end, target=" + finalIndex)
                         dragOffsetPx = null
                         pendingIndex = null
                         onDraggingChange(false)

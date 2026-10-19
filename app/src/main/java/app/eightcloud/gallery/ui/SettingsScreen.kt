@@ -201,6 +201,59 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             )
         }
 
+        // App log: rolling on-device log (starts, backup runs, slider drags,
+        // memory warnings, previous exit reasons). Share sends it as text.
+        var showLogDialog by remember { mutableStateOf(false) }
+        var logVersion by remember { mutableStateOf(0) }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showLogDialog = true }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.padding(start = 12.dp)) {
+                Text("App log", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Diagnostics for bug reports - stays on this device",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (showLogDialog) {
+            val logText = remember(logVersion) { app.eightcloud.gallery.AppLog.read(context) }
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showLogDialog = false },
+                title = { Text("App log") },
+                text = {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        Text(
+                            if (logText.isBlank()) "No log entries yet" else logText,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_TEXT, logText)
+                        }
+                        context.startActivity(
+                            android.content.Intent.createChooser(send, "Share app log")
+                        )
+                    }) { Text("Share") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        app.eightcloud.gallery.AppLog.clear(context)
+                        logVersion++
+                    }) { Text("Clear") }
+                }
+            )
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()

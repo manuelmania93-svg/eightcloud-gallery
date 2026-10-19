@@ -31,6 +31,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         td.start()
         if (td.authState !is TdApi.AuthorizationStateReady) return Result.retry()
         val ids = inputData.getLongArray(KEY_IDS)?.toSet()
+        app.eightcloud.gallery.AppLog.log("backup", "worker start (manual=" + manual + ")")
         return try {
             setForegroundAsync(foregroundInfo(0, 0, "Preparing backup..."))
             val engine = BackupEngine(applicationContext)
@@ -50,6 +51,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             notifyManager().cancel(NOTIFICATION_ID)
             Result.success()
         } catch (e: Exception) {
+            app.eightcloud.gallery.AppLog.log("backup", "worker error: " + (e.message ?: e.javaClass.simpleName))
             e.printStackTrace()
             notifyManager().cancel(NOTIFICATION_ID)
             if (runAttemptCount < 5) Result.retry() else Result.failure()

@@ -89,6 +89,7 @@ class BackupEngine(private val context: Context) {
             )
             added++
         }
+        app.eightcloud.gallery.AppLog.log("backup", "scan done: " + added + " new of " + items.size)
         added
     }
 
@@ -112,6 +113,8 @@ class BackupEngine(private val context: Context) {
         val topicPics = prefs.getLong("topicPics", 0L).takeIf { it != 0L }
         val topicVids = prefs.getLong("topicVids", 0L).takeIf { it != 0L }
         BackupProgress.state.value = BackupProgress.State(true, 0, total, 0L, totalBytes, "")
+        app.eightcloud.gallery.AppLog.log("backup", "upload run start: " + total + " files, " + totalBytes + " bytes")
+        var failures = 0
         pending.forEachIndexed { index, entry ->
             onProgress(index, total, doneBytes, totalBytes, entry.name)
             BackupProgress.state.value =
@@ -120,6 +123,8 @@ class BackupEngine(private val context: Context) {
                 val thread = if (toGroup) (if (entry.isVideo) topicVids else topicPics) else null
                 uploadOne(entry, destChat, thread)
             } catch (e: Exception) {
+                failures++
+                app.eightcloud.gallery.AppLog.log("backup", "FAILED " + entry.name + ": " + (e.message ?: e.javaClass.simpleName))
                 db.dao().markFailed(entry.contentHash, e.message ?: e.javaClass.simpleName)
             }
             doneBytes += entry.sizeBytes
@@ -128,6 +133,7 @@ class BackupEngine(private val context: Context) {
                 BackupProgress.State(true, index + 1, total, doneBytes, totalBytes, entry.name)
         }
         BackupProgress.state.value = BackupProgress.State(false, total, total, totalBytes, totalBytes, "")
+        app.eightcloud.gallery.AppLog.log("backup", "upload run end: " + total + " files, " + failures + " failed")
     }
 
     /** FAILED entries with their recorded reasons. */
@@ -377,6 +383,7 @@ class BackupEngine(private val context: Context) {
             }
         }
         onProgress(targets.size, targets.size, "")
+        app.eightcloud.gallery.AppLog.log("restore", "restored " + restored + ", failed " + failed)
         RestoreResult(restored, failed)
     }
 

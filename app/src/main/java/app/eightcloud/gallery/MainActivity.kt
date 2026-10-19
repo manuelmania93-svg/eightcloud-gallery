@@ -56,6 +56,18 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CrashLogger.install(this)
+        AppLog.init(this)
+        AppLog.log("app", "start v" + BuildConfig.VERSION_NAME + " on " +
+            android.os.Build.MODEL + " API " + android.os.Build.VERSION.SDK_INT)
+        AppLog.recordLastExitReasons(this)
+        registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {}
+            @Deprecated("deprecated in Android")
+            override fun onLowMemory() { AppLog.log("memory", "onLowMemory") }
+            override fun onTrimMemory(level: Int) {
+                if (level >= TRIM_MEMORY_RUNNING_LOW) AppLog.log("memory", "onTrimMemory level=" + level)
+            }
+        })
         enableEdgeToEdge()
         // VideoFrameDecoder so video thumbnails actually render in the grid.
         Coil.setImageLoader(

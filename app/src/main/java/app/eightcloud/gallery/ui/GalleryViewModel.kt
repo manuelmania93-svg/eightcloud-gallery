@@ -214,6 +214,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 MediaStoreSource.query(getApplication())
             }
             allItems = result
+            app.eightcloud.gallery.AppLog.log("media", "loaded " + result.size + " items")
             _bucketCounts.value = result.groupingBy { it.bucket.ifBlank { "Other" } }.eachCount()
             refreshTrashItems()
             computeDuplicates()
