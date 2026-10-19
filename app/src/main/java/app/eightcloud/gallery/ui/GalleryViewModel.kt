@@ -92,8 +92,9 @@ internal fun matchesSmartAlbum(
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
-        private const val SEMANTIC_MIN = 0.22f
-        private const val SEMANTIC_BAND = 0.05f
+        private const val SEMANTIC_MIN = 0.23f
+        private const val SEMANTIC_BAND = 0.04f
+        private const val SEMANTIC_ABOVE_MEDIAN = 0.04f
         const val TRASH_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
     }
 
@@ -514,7 +515,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     /** Top-3 CLIP prompts for one item (info-sheet debug view); null when no embedding yet. */
     suspend fun clipTop(mediaStoreId: Long): List<Pair<String, Float>>? = withContext(Dispatchers.IO) {
         val row = app.eightcloud.gallery.backup.BackupDb.get(getApplication()).clipDao()
-            .byIds(listOf(mediaStoreId)).firstOrNull() ?: return@withContext null
+            .byIds(listOf(mediaStoreId)).firstOrNull()?.takeIf { it.ver >= 2 } ?: return@withContext null
         clipPrompts().top(app.eightcloud.gallery.labels.ClipPrompts.fromBlob(row.embedding), 3)
     }
 
@@ -533,7 +534,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 .filterValues { it.isNotEmpty() }
             val negatives = mutableMapOf<String, MutableList<FloatArray>>()
             rejected.keys.toList().chunked(500).forEach { chunk ->
-                clipDao.byIds(chunk).forEach { row ->
+                clipDao.byIds(chunk).filter { it.ver >= 2 }.forEach { row ->
                     val emb = ClipPrompts.fromBlob(row.embedding)
                     rejected[row.mediaStoreId]?.forEach { cat ->
                         negatives.getOrPut(cat) { mutableListOf() }.add(emb)
@@ -740,11 +741,61 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
                 computeCategoryAlbums()
             }
+            reembedClip(scanner, videoLabels)
             _labelScanProgress.value = null
             rescoreClip()
             if (_autoSecureSensitive.value) moveToSecure(sensitiveNotSecure())
             applyView()
         }
+    }
+
+    /**
+     * Re-embeds every already-scanned item with the current CLIP model (B/16). Old categories
+     * stay visible until an item is reached. Throttled and charging-gated like the main scan.
+     */
+    private suspend fun reembedClip(scanner: app.eightcloud.gallery.labels.MediaScanner, videoLabels: Boolean) {
+        val dao = app.eightcloud.gallery.backup.BackupDb.get(getApplication()).clipDao()
+        val ver = app.eightcloud.gallery.labels.ClipPrompts.EMBEDDING_VER
+        val have = withContext(Dispatchers.IO) { dao.allIds().toHashSet() }
+        val failedClip = mutableSetOf<Long>()
+        var batches = 0
+        while (true) {
+            val labels = _mediaLabels.value
+            val pending = allItems.filter {
+                (!it.isVideo || videoLabels) && it.id !in have && it.id !in failedClip && labels.containsKey(it.id)
+            }
+            if (pending.isEmpty()) break
+            _labelScanProgress.value = have.size to (have.size + pending.size)
+            while (pending.size > 200 && _scanOnlyWhileCharging.value && !isCharging()) {
+                kotlinx.coroutines.delay(30_000)
+            }
+            kotlinx.coroutines.delay(250)
+            withContext(Dispatchers.IO) {
+                pending.take(25).forEach { item ->
+                    val emb = runCatching {
+                        scanner.embedOnly(item.id, android.net.Uri.parse(item.uri), item.isVideo)
+                    }.getOrNull()
+                    val entry = _mediaLabels.value[item.id]
+                    if (emb == null || entry == null) {
+                        failedClip += item.id
+                    } else {
+                        dao.upsert(
+                            app.eightcloud.gallery.backup.ClipEmbedding(
+                                item.id, app.eightcloud.gallery.labels.ClipPrompts.toBlob(emb), ver
+                            )
+                        )
+                        val merged = app.eightcloud.gallery.labels.ClipPrompts
+                            .mergeIntoLabelConfs(entry.labelConfs, scanner.prompts.scores(emb))
+                        val updated = entry.copy(labelConfs = merged)
+                        mediaLabelDao.upsert(updated)
+                        _mediaLabels.value = _mediaLabels.value + (item.id to updated)
+                        have += item.id
+                    }
+                }
+            }
+            if (++batches % 4 == 0) computeCategoryAlbums()
+        }
+        computeCategoryAlbums()
     }
 
     fun scanGeo() {
@@ -1227,12 +1278,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 val s = app.eightcloud.gallery.labels.ClipPrompts.dot(
                     qe, app.eightcloud.gallery.labels.ClipPrompts.fromBlob(row.embedding)
                 )
-                if (s >= SEMANTIC_MIN) all += row.mediaStoreId to s
+                all += row.mediaStoreId to s
             }
         }
         if (all.isEmpty()) return@withContext emptyMap()
         val best = all.maxOf { it.second }
-        val cut = maxOf(SEMANTIC_MIN, best - SEMANTIC_BAND)
+        val median = all.map { it.second }.sorted()[all.size / 2]
+        val cut = maxOf(SEMANTIC_MIN, median + SEMANTIC_ABOVE_MEDIAN, best - SEMANTIC_BAND)
         all.filter { it.second >= cut }.sortedByDescending { it.second }.take(500).toMap()
     }
 

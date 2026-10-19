@@ -89,7 +89,7 @@ class MediaScanner(private val context: Context) {
         val clipEmb = clipScorer.embed(bitmap)
         if (clipEmb != null) {
             BackupDb.get(context).clipDao()
-                .upsert(app.eightcloud.gallery.backup.ClipEmbedding(mediaStoreId, ClipPrompts.toBlob(clipEmb)))
+                .upsert(app.eightcloud.gallery.backup.ClipEmbedding(mediaStoreId, ClipPrompts.toBlob(clipEmb), ClipPrompts.EMBEDDING_VER))
         }
         val imageArea = bitmap.width.toFloat() * bitmap.height.toFloat()
         val maxFaceRatio = faces?.maxOfOrNull { f ->
@@ -115,6 +115,29 @@ class MediaScanner(private val context: Context) {
         BackupDb.get(context).mediaLabelDao().upsert(entry)
         return entry
     }
+
+    /**
+     * CLIP-only pass: embeds one item with the current model, stores it and refreshes the
+     * CLIP shares inside the existing label row. Returns the embedding or null on failure.
+     */
+    fun embedOnly(mediaStoreId: Long, uri: Uri, isVideo: Boolean): FloatArray? {
+        val bitmap = if (isVideo) {
+            val retriever = android.media.MediaMetadataRetriever()
+            val frame = runCatching {
+                retriever.setDataSource(context, uri)
+                val durationMs = retriever
+                    .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                retriever.getFrameAtTime(durationMs * 300, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }.getOrNull()
+            runCatching { retriever.release() }
+            frame
+        } else loadBitmap(uri, 448)
+        val emb = bitmap?.let { clipScorer.embed(it) } ?: return null
+        return emb
+    }
+
+    val prompts: ClipPrompts get() = clipScorer.prompts
 
     private fun loadBitmap(uri: Uri, maxSize: Int): Bitmap? {
         val resolver = context.contentResolver

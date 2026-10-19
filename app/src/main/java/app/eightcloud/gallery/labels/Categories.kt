@@ -23,8 +23,9 @@ object Categories {
     const val NIGHT = "cat_night"
     const val BEACH = "cat_beach"
     const val ADULT = "cat_adult"
+    const val DRAWN = "cat_drawn"
 
-    val ALL = listOf(PEOPLE, DOCUMENTS, MEMES, OUTDOOR, FOOD, ANIMALS, CARS, NIGHT, BEACH, ADULT)
+    val ALL = listOf(PEOPLE, DOCUMENTS, MEMES, OUTDOOR, FOOD, ANIMALS, CARS, NIGHT, BEACH, DRAWN, ADULT)
 
     const val NSFW_THRESHOLD = 0.7f
 
@@ -39,6 +40,9 @@ object Categories {
     private const val CLIP_PEOPLE = 0.4f
     private const val CLIP_DOCUMENT = 0.5f
     private const val CLIP_ML_OVERRIDE = 0.92f
+    private const val CLIP_DRAWN = 0.25f
+    private const val CLIP_MEME = 0.3f
+    private const val MEME_CLIP_MIN_OCR_CHARS = 8
 
     // Documents: real OCR text on a camera photo.
     private const val DOC_MIN_OCR_CHARS = 150
@@ -56,6 +60,7 @@ object Categories {
         CARS -> "Cars"
         NIGHT -> "Night"
         BEACH -> "Beach"
+        DRAWN -> "Drawn / Cartoon / Anime"
         ADULT -> "Sensitive"
         else -> key
     }
@@ -130,8 +135,14 @@ object Categories {
         if (cameraBucket && ocrChars >= DOC_MIN_OCR_CHARS) out += DOCUMENTS
         if (!isScreenshot && clipHit("document", CLIP_DOCUMENT) && ocrChars >= 20) out += DOCUMENTS
 
-        // Memes: screenshots carrying real text (posts, chat screenshots).
-        if (isScreenshot && ocrChars >= MEME_MIN_OCR_CHARS) out += MEMES
+        // Drawn / cartoon / anime: CLIP only (no legacy fallback).
+        if (clipHit("drawn", CLIP_DRAWN)) out += DRAWN
+
+        // Memes: with CLIP, the meme-prompt share plus some real text; plain screenshots
+        // and documents no longer count. Legacy rows without CLIP keep the old rule.
+        if (hasClip) {
+            if (clipHit("meme", CLIP_MEME) && ocrChars >= MEME_CLIP_MIN_OCR_CHARS) out += MEMES
+        } else if (isScreenshot && ocrChars >= MEME_MIN_OCR_CHARS) out += MEMES
 
         return out
     }

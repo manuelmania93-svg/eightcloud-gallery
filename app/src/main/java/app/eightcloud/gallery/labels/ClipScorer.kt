@@ -44,7 +44,9 @@ class ClipPrompts(val cats: List<String>, val names: List<String>, val matrix: A
         const val DIM = 512
         const val NEGATIVE_COS = 0.92f
         /** Bump when the prompt list changes so stored scores are recomputed. */
-        const val PROMPT_VERSION = 1
+        const val PROMPT_VERSION = 2
+        /** Embedding generation: 1 = B/32 (old), 2 = B/16. */
+        const val EMBEDDING_VER = 2
 
         fun dot(a: FloatArray, b: FloatArray): Float {
             var s = 0f
@@ -95,17 +97,23 @@ class ClipPrompts(val cats: List<String>, val names: List<String>, val matrix: A
     }
 }
 
-/** CLIP ViT-B/32 image encoder (int8 ONNX) running on the ONNX runtime the app already ships. */
+/** CLIP ViT-B/16 image encoder (int8 ONNX) running on the ONNX runtime the app already ships. */
 class ClipScorer(private val context: Context) {
 
     private val env = OrtEnvironment.getEnvironment()
 
+    init {
+        // B/32 models from v0.12.0/v0.12.1 are no longer used.
+        File(context.filesDir, "clip_vision_v1.onnx").delete()
+        File(context.filesDir, "clip_text_v1.onnx").delete()
+    }
+
     val prompts: ClipPrompts by lazy { ClipPrompts.load(context) }
 
     private val session: OrtSession by lazy {
-        val target = File(context.filesDir, "clip_vision_v1.onnx")
+        val target = File(context.filesDir, "clip_vision_v2.onnx")
         if (!target.exists() || target.length() < 1_000_000L) {
-            val tmp = File(context.filesDir, "clip_vision_v1.tmp")
+            val tmp = File(context.filesDir, "clip_vision_v2.tmp")
             context.assets.open("clip_vision.onnx").use { input ->
                 tmp.outputStream().use { out -> input.copyTo(out) }
             }
@@ -150,9 +158,9 @@ class ClipScorer(private val context: Context) {
     }.getOrNull()
 
     private val textSession: OrtSession by lazy {
-        val target = File(context.filesDir, "clip_text_v1.onnx")
+        val target = File(context.filesDir, "clip_text_v2.onnx")
         if (!target.exists() || target.length() < 1_000_000L) {
-            val tmp = File(context.filesDir, "clip_text_v1.tmp")
+            val tmp = File(context.filesDir, "clip_text_v2.tmp")
             context.assets.open("clip_text.onnx").use { input ->
                 tmp.outputStream().use { out -> input.copyTo(out) }
             }

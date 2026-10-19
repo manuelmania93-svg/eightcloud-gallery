@@ -1,6 +1,7 @@
 package app.eightcloud.gallery.backup
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -211,7 +212,8 @@ data class FaceEntity(
 @Entity(tableName = "clip_embeddings")
 data class ClipEmbedding(
     @PrimaryKey val mediaStoreId: Long,
-    val embedding: ByteArray
+    val embedding: ByteArray,
+    @ColumnInfo(defaultValue = "1") val ver: Int = 1
 )
 
 @Dao
@@ -219,13 +221,13 @@ interface ClipDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(row: ClipEmbedding)
 
-    @Query("SELECT * FROM clip_embeddings WHERE mediaStoreId > :after ORDER BY mediaStoreId LIMIT :limit")
+    @Query("SELECT * FROM clip_embeddings WHERE ver = 2 AND mediaStoreId > :after ORDER BY mediaStoreId LIMIT :limit")
     suspend fun page(after: Long, limit: Int): List<ClipEmbedding>
 
     @Query("SELECT * FROM clip_embeddings WHERE mediaStoreId IN (:ids)")
     suspend fun byIds(ids: List<Long>): List<ClipEmbedding>
 
-    @Query("SELECT mediaStoreId FROM clip_embeddings")
+    @Query("SELECT mediaStoreId FROM clip_embeddings WHERE ver = 2")
     suspend fun allIds(): List<Long>
 }
 
@@ -306,7 +308,7 @@ interface GeoDao {
     suspend fun locatedCount(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class, Person::class, FaceEntity::class, FaceScan::class, ClipEmbedding::class], version = 11, exportSchema = false)
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class, Person::class, FaceEntity::class, FaceScan::class, ClipEmbedding::class], version = 12, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
@@ -402,6 +404,12 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE clip_embeddings ADD COLUMN ver INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         private val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -443,7 +451,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12).build().also { instance = it }
         }
     }
 }

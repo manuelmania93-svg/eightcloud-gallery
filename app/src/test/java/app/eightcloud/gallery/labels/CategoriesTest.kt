@@ -94,4 +94,25 @@ class CategoriesTest {
         assertTrue(parsed.size == 2)
         assertTrue(parsed[0].first == "Sky" && parsed[0].second == 0.91f)
     }
+
+    @Test
+    fun clipDrawnShareMakesDrawnCategory() {
+        val cats = Categories.forItem(0, 0f, confs("~drawn" to 0.4f), 0, -1f, false, false)
+        assertTrue(Categories.DRAWN in cats)
+        val none = Categories.forItem(0, 0f, confs("~drawn" to 0.1f), 0, -1f, false, false)
+        assertTrue(Categories.DRAWN !in none)
+    }
+
+    @Test
+    fun clipMemeNeedsShareAndSomeText() {
+        assertTrue(Categories.MEMES in Categories.forItem(0, 0f, confs("~meme" to 0.5f), 20, -1f, false, false))
+        assertTrue(Categories.MEMES !in Categories.forItem(0, 0f, confs("~meme" to 0.5f), 0, -1f, false, false))
+        assertTrue(Categories.MEMES !in Categories.forItem(0, 0f, confs("~meme" to 0.1f), 90, -1f, false, false))
+    }
+
+    @Test
+    fun plainScreenshotWithClipDataIsNotMeme() {
+        val cats = Categories.forItem(0, 0f, confs("~other" to 0.9f), 300, -1f, true, false)
+        assertTrue(Categories.MEMES !in cats)
+    }
 }

@@ -39,12 +39,30 @@ document|a photo of a paper document
 document|a page of printed text
 document|a receipt or an invoice
 document|a whiteboard with writing
+drawn|a drawing
+drawn|a cartoon
+drawn|an anime illustration
+drawn|a manga page
+drawn|a digital painting
+drawn|a cartoon character
+drawn|an illustration
+drawn|anime artwork of a girl
+drawn|a comic strip
+drawn|a cartoon creature or monster
+drawn|a frame from an animated cartoon show
+drawn|a children's book illustration
+meme|a meme with big white text at the top and bottom of an image
+meme|an image macro meme
+meme|a funny reaction image with a caption
+meme|a meme with text over a picture
+meme|a social media meme
 other|a photo of a room indoors
 other|a photo of a building
 other|a photo of a street in a city
 other|a photo of an object on a table
 other|a screenshot of a phone app
-other|a drawing or a cartoon
+other|a screenshot of a chat conversation
+other|a screenshot of a settings menu
 other|a photo of a product
 other|a blurry photo
 other|an airplane or an airport
