@@ -53,6 +53,13 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val privacyScreen by viewModel.privacyScreen.collectAsState()
     val hideSensitive by viewModel.hideSensitive.collectAsState()
     val autoSecureSensitive by viewModel.autoSecureSensitive.collectAsState()
+    val settingsContext = androidx.compose.ui.platform.LocalContext.current
+    var backupDocs by remember {
+        mutableStateOf(
+            settingsContext.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                .getBoolean("backupDocuments", false)
+        )
+    }
     var askAutoSecure by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
@@ -218,6 +225,36 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
                 onCheckedChange = {
                     if (autoSecureSensitive) viewModel.setAutoSecureSensitive(false, false)
                     else askAutoSecure = viewModel.sensitiveNotSecure().size + 1
+                }
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VisibilityOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text("Back up documents", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Include PDFs and other documents in the Telegram backup (encrypted like photos). Needs All files access (open Albums -> Documents). Off by default.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = backupDocs,
+                onCheckedChange = {
+                    backupDocs = it
+                    settingsContext.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("backupDocuments", it).apply()
                 }
             )
         }
