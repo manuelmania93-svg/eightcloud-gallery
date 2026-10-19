@@ -420,7 +420,8 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
             .width(28.dp)
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current
-        val thumbHeight = 48.dp
+        val thumbHeight = 64.dp
+        val thumbHeightPx = with(density) { thumbHeight.toPx() }
         val trackHeightPx = with(density) { (maxHeight - thumbHeight).toPx() }.coerceAtLeast(1f)
         val total = entries.size
         var dragOffsetPx by remember { mutableStateOf<Float?>(null) }
@@ -429,44 +430,66 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(gridState:
             ?: if (total <= 1) 0f
             else (gridState.firstVisibleItemIndex.toFloat() / (total - 1)).coerceIn(0f, 1f)
         val thumbOffsetDp = with(density) { (fraction * trackHeightPx).toDp() }
-        val dragging = dragOffsetPx != null
+        val showBubble = dragOffsetPx != null || gridState.isScrollInProgress
+
+        // The whole strip is a jump zone: tap or drag anywhere on it to go
+        // straight to that position, no matter how large the library is.
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(28.dp)
+                .pointerInput(total, trackHeightPx) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        dragOffsetPx = (down.position.y - thumbHeightPx / 2f).coerceIn(0f, trackHeightPx)
+                        scope.launch {
+                            gridState.scrollToItem(
+                                ((dragOffsetPx!! / trackHeightPx) * (total - 1))
+                                    .roundToInt().coerceIn(0, total - 1)
+                            )
+                        }
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.none { it.pressed }) break
+                            event.changes.forEach { change ->
+                                change.consume()
+                                dragOffsetPx = (change.position.y - thumbHeightPx / 2f)
+                                    .coerceIn(0f, trackHeightPx)
+                                scope.launch {
+                                    gridState.scrollToItem(
+                                        ((dragOffsetPx!! / trackHeightPx) * (total - 1))
+                                            .roundToInt().coerceIn(0, total - 1)
+                                    )
+                                }
+                            }
+                        }
+                        dragOffsetPx = null
+                    }
+                }
+        )
 
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .offset(y = thumbOffsetDp)
                 .padding(end = 4.dp)
-                .width(6.dp)
+                .width(10.dp)
                 .height(thumbHeight)
-                .clip(RoundedCornerShape(3.dp))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = if (dragging) 0.9f else 0.45f))
-                .pointerInput(total, trackHeightPx) {
-                    detectVerticalDragGestures(
-                        onDragStart = { dragOffsetPx = fraction * trackHeightPx },
-                        onDragEnd = { dragOffsetPx = null },
-                        onDragCancel = { dragOffsetPx = null },
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            val next = ((dragOffsetPx ?: 0f) + dragAmount).coerceIn(0f, trackHeightPx)
-                            dragOffsetPx = next
-                            val index = ((next / trackHeightPx) * (total - 1))
-                                .roundToInt()
-                                .coerceIn(0, total - 1)
-                            scope.launch { gridState.scrollToItem(index) }
-                        }
-                    )
-                }
+                .clip(RoundedCornerShape(5.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = if (dragOffsetPx != null) 0.95f else 0.5f))
         )
 
-        if (dragging) {
+        if (showBubble) {
             val label = bubbleLabelOf(entries.getOrNull(gridState.firstVisibleItemIndex), field)
             androidx.compose.material3.Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(12.dp),
+                shadowElevation = 4.dp,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .offset(y = thumbOffsetDp)
-                    .padding(end = 18.dp)
+                    .padding(end = 22.dp)
             ) {
                 Text(
                     text = label,
