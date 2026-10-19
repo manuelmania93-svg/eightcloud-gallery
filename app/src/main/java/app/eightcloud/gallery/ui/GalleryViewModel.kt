@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP, SLIDESHOW }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP, SLIDESHOW, SECURE }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 data class SmartAlbum(val key: String, val title: String, val count: Int)
@@ -320,6 +320,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             allItems = result
             app.eightcloud.gallery.AppLog.log("media", "loaded " + result.size + " items")
+            _secureIds.value = withContext(Dispatchers.IO) { secureDao.ids() }.toSet()
+            refreshSecureItems()
             computeAlbumsAndMemories()
             _bucketCounts.value = result.groupingBy { it.bucket.ifBlank { "Other" } }.eachCount()
             refreshTrashItems()
@@ -494,6 +496,54 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }
+    }
+
+    // Secure folder: ids hidden from the main grid, stored in Room (backup-index.db).
+    private val secureDao by lazy { BackupDb.get(getApplication()).secureDao() }
+    private val _secureIds = MutableStateFlow<Set<Long>>(emptySet())
+    val secureIds: StateFlow<Set<Long>> = _secureIds
+    private val _secureItems = MutableStateFlow<List<MediaItem>>(emptyList())
+    val secureItems: StateFlow<List<MediaItem>> = _secureItems
+    private val _secureUnlocked = MutableStateFlow(false)
+    val secureUnlocked: StateFlow<Boolean> = _secureUnlocked
+
+    fun unlockSecure() { _secureUnlocked.value = true }
+
+    fun openSecureFolder() { _screen.value = Screen.SECURE }
+
+    fun moveSelectionToSecure() {
+        moveToSecure(_selection.value)
+        clearSelection()
+    }
+
+    fun moveToSecure(ids: Set<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val rows = ids.mapNotNull { id ->
+                allItems.firstOrNull { it.id == id }
+                    ?.let { app.eightcloud.gallery.backup.SecureEntry(id, it.name, it.isVideo, now) }
+            }
+            withContext(Dispatchers.IO) { secureDao.upsertAll(rows) }
+            _secureIds.value = _secureIds.value + rows.map { it.mediaStoreId }
+            refreshSecureItems()
+            applyView()
+        }
+    }
+
+    fun removeFromSecure(ids: Set<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { secureDao.delete(ids.toList()) }
+            _secureIds.value = _secureIds.value - ids
+            refreshSecureItems()
+            applyView()
+        }
+    }
+
+    private fun refreshSecureItems() {
+        val ids = _secureIds.value
+        _secureItems.value = allItems.filter { it.id in ids }.sortedByDescending { it.dateMillis }
     }
 
     private val _appLock = MutableStateFlow(prefs.getBoolean("appLock", false))
@@ -678,12 +728,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val ascending = _sortAscending.value
         val statusMap = _statusById.value
         val smart = _smartFilter.value
+        val secure = _secureIds.value
         val memoriesEnabled = _featureToggles.value["feat_on_this_day"] != false
         val memories = _memories.value
         val source = allItems
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
-                val base = if (trashed.isEmpty()) source else source.filter { !trashed.containsKey(it.id) }
+                var base = if (trashed.isEmpty()) source else source.filter { !trashed.containsKey(it.id) }
+                if (secure.isNotEmpty()) base = base.filter { it.id !in secure }
                 var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
                 if (smart != null) view = view.filter { matchesSmartAlbum(it, smart) }

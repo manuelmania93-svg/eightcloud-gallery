@@ -189,6 +189,40 @@ class MainActivitySmokeTest {
     }
 
     @Test
+    fun secureFolderHidesAndRestoresItem() {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val uri = insertTestImage("SecureMe.png", System.currentTimeMillis())
+        val id = android.content.ContentUris.parseId(uri)
+        try {
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
+            }
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithContentDescription("SecureMe.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].moveToSecure(setOf(id))
+            }
+            composeRule.waitUntil(timeoutMillis = 10000) {
+                composeRule.onAllNodesWithContentDescription("SecureMe.png")
+                    .fetchSemanticsNodes().isEmpty()
+            }
+            composeRule.activityRule.scenario.onActivity { activity ->
+                val vm = ViewModelProvider(activity)[GalleryViewModel::class.java]
+                assert(vm.secureItems.value.any { it.id == id })
+                vm.removeFromSecure(setOf(id))
+            }
+            composeRule.waitUntil(timeoutMillis = 10000) {
+                composeRule.onAllNodesWithContentDescription("SecureMe.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+        } finally {
+            resolver.delete(uri, null, null)
+        }
+    }
+
+    @Test
     fun viewerCloseRestoresGridPosition() {
         val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
         val prefs = InstrumentationRegistry.getInstrumentation().targetContext

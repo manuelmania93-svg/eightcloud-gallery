@@ -156,6 +156,28 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clickable { viewModel.openSecureFolder() }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column(modifier = Modifier.padding(start = 12.dp)) {
+                    Text("Secure folder", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Hidden items, locked behind your screen lock",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
                     .clickable { viewModel.openStorageStats() }
                     .padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically

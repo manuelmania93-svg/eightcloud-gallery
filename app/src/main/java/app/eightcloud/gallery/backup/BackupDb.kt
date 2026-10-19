@@ -84,9 +84,34 @@ interface BackupDao {
     suspend fun pendingByIds(ids: List<Long>): List<BackupEntry>
 }
 
-@Database(entities = [BackupEntry::class], version = 3, exportSchema = false)
+/** Items hidden behind the app lock (secure folder). */
+@Entity(tableName = "secure_entries")
+data class SecureEntry(
+    @PrimaryKey val mediaStoreId: Long,
+    val name: String,
+    val isVideo: Boolean,
+    val addedAt: Long
+)
+
+@Dao
+interface SecureDao {
+    @Query("SELECT mediaStoreId FROM secure_entries")
+    suspend fun ids(): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entries: List<SecureEntry>)
+
+    @Query("DELETE FROM secure_entries WHERE mediaStoreId IN (:ids)")
+    suspend fun delete(ids: List<Long>)
+
+    @Query("SELECT COUNT(*) FROM secure_entries")
+    suspend fun count(): Int
+}
+
+@Database(entities = [BackupEntry::class, SecureEntry::class], version = 4, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
+    abstract fun secureDao(): SecureDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -100,6 +125,18 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS secure_entries (" +
+                        "mediaStoreId INTEGER NOT NULL PRIMARY KEY, " +
+                        "name TEXT NOT NULL, " +
+                        "isVideo INTEGER NOT NULL, " +
+                        "addedAt INTEGER NOT NULL)"
+                )
+            }
+        }
+
         @Volatile private var instance: BackupDb? = null
 
         fun get(context: Context): BackupDb = instance ?: synchronized(this) {
@@ -107,7 +144,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
         }
     }
 }

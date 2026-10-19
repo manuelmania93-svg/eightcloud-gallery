@@ -225,6 +225,34 @@ fun EightCloudApp() {
                             Screen.STORAGE_STATS -> StorageStatsScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.CLEANUP -> CleanupScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.SLIDESHOW -> SlideshowScreen(viewModel, onBack = { viewModel.backToGrid() })
+                            Screen.SECURE -> SecureFolderScreen(
+                                viewModel,
+                                onBack = { viewModel.backToGrid() },
+                                onRequestUnlock = {
+                                    runCatching {
+                                        val executor = ContextCompat.getMainExecutor(context)
+                                        val prompt = androidx.biometric.BiometricPrompt(
+                                            context as androidx.fragment.app.FragmentActivity,
+                                            executor,
+                                            object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+                                                override fun onAuthenticationSucceeded(
+                                                    result: androidx.biometric.BiometricPrompt.AuthenticationResult
+                                                ) {
+                                                    viewModel.unlockSecure()
+                                                }
+                                            }
+                                        )
+                                        val info = androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+                                            .setTitle("Unlock secure folder")
+                                            .setDeviceCredentialAllowed(true)
+                                            .build()
+                                        prompt.authenticate(info)
+                                    }.onFailure {
+                                        // No biometrics/screen lock on this device.
+                                        viewModel.unlockSecure()
+                                    }
+                                }
+                            )
                             Screen.BACKUP -> {
                                 val backupViewModel: BackupViewModel = viewModel()
                                 BackupScreen(backupViewModel, onBack = { viewModel.backToGrid() })

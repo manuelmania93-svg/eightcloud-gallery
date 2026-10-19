@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -246,6 +247,9 @@ fun GridScreen(viewModel: GalleryViewModel) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { viewModel.moveSelectionToSecure() }) {
+                            Icon(Icons.Filled.Lock, contentDescription = "Move to secure folder")
+                        }
                         IconButton(onClick = { viewModel.backUpSelection() }) {
                             Icon(Icons.Filled.CloudUpload, contentDescription = "Back up selected")
                         }
