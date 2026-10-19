@@ -24,6 +24,41 @@ import androidx.compose.ui.platform.LocalView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun SlideshowVideo(item: app.eightcloud.gallery.data.MediaItem, onEnded: () -> Unit) {
+    val context = LocalContext.current
+    val player = remember(item.id) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.parse(item.uri)))
+            prepare()
+            play()
+        }
+    }
+    DisposableEffect(item.id) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_ENDED) onEnded()
+            }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // Skip a broken video instead of stalling the show.
+                onEnded()
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.release() }
+    }
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            androidx.media3.ui.StyledPlayerView(ctx).apply {
+                this.player = player
+                useController = false
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
 @Composable
 fun SlideshowScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
     val items by viewModel.items.collectAsState()
@@ -31,13 +66,21 @@ fun SlideshowScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
     val speedSec by viewModel.slideshowSpeedSec.collectAsState()
     val loop by viewModel.slideshowLoop.collectAsState()
     val musicUri by viewModel.slideshowMusicUri.collectAsState()
+    val videoMode by viewModel.slideshowVideoMode.collectAsState()
     val context = LocalContext.current
     val view = LocalView.current
 
-    val playlist = remember(items, order) {
-        if (order == "RANDOM") items.shuffled() else items
+    val playlist = remember(items, order, videoMode) {
+        val base = if (videoMode == "SKIP") items.filter { !it.isVideo } else items
+        if (order == "RANDOM") base.shuffled() else base
     }
     var index by remember { mutableIntStateOf(0) }
+
+    fun advance() {
+        if (index + 1 < playlist.size) index++
+        else if (loop) index = 0
+        else onBack()
+    }
 
     BackHandler { onBack() }
 
@@ -67,17 +110,12 @@ fun SlideshowScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
         }
     }
 
-    // Advance on the chosen interval.
-    LaunchedEffect(index, playlist.size, speedSec) {
-        if (playlist.isEmpty()) return@LaunchedEffect
+    // Advance on the chosen interval; videos playing in full advance on end.
+    val currentIsPlayingVideo = playlist.getOrNull(index)?.isVideo == true && videoMode == "PLAY"
+    LaunchedEffect(index, playlist.size, speedSec, currentIsPlayingVideo) {
+        if (playlist.isEmpty() || currentIsPlayingVideo) return@LaunchedEffect
         delay(speedSec * 1000L)
-        if (index + 1 < playlist.size) {
-            index++
-        } else if (loop) {
-            index = 0
-        } else {
-            onBack()
-        }
+        advance()
     }
 
     Box(
@@ -88,7 +126,9 @@ fun SlideshowScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
         contentAlignment = Alignment.Center
     ) {
         val current = playlist.getOrNull(index)
-        if (current != null) {
+        if (current != null && current.isVideo && videoMode == "PLAY") {
+            SlideshowVideo(item = current, onEnded = { advance() })
+        } else if (current != null) {
             androidx.compose.animation.Crossfade(targetState = current, label = "slide") { item ->
                 AsyncImage(
                     model = coil.request.ImageRequest.Builder(context)

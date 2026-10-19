@@ -56,6 +56,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val slideshowSpeedSec by viewModel.slideshowSpeedSec.collectAsState()
     val slideshowLoop by viewModel.slideshowLoop.collectAsState()
     val slideshowMusicUri by viewModel.slideshowMusicUri.collectAsState()
+    val slideshowVideoMode by viewModel.slideshowVideoMode.collectAsState()
     val splitLargeFiles by viewModel.splitLargeFiles.collectAsState()
 
     BackHandler { viewModel.backToGrid() }
@@ -243,6 +244,21 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
                                 onValueChange = { viewModel.setSlideshowSpeedSec(it.toInt()) },
                                 valueRange = 2f..15f
                             )
+                            Text("Videos", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                            listOf("PLAY" to "Play fully", "SKIP" to "Skip videos").forEach { (value, label) ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.setSlideshowVideoMode(value) }
+                                ) {
+                                    RadioButton(
+                                        selected = slideshowVideoMode == value,
+                                        onClick = { viewModel.setSlideshowVideoMode(value) }
+                                    )
+                                    Text(label)
+                                }
+                            }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()

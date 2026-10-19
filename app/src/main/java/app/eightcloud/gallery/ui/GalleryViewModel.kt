@@ -399,6 +399,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         else prefs.edit().putString("slideshowMusic", uri).apply()
     }
 
+    private val _slideshowVideoMode = MutableStateFlow(prefs.getString("slideshowVideos", "PLAY")!!)
+    val slideshowVideoMode: StateFlow<String> = _slideshowVideoMode
+
+    fun setSlideshowVideoMode(mode: String) {
+        _slideshowVideoMode.value = mode
+        prefs.edit().putString("slideshowVideos", mode).apply()
+    }
+
     fun openSlideshow() { _screen.value = Screen.SLIDESHOW }
     fun openAlbums() { _screen.value = Screen.ALBUMS }
     fun openTrash() { _screen.value = Screen.TRASH }

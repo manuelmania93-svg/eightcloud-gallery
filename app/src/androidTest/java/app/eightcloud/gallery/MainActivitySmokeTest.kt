@@ -172,6 +172,48 @@ class MainActivitySmokeTest {
     }
 
     @Test
+    fun viewerOpensVideoItemWithoutCrashing() {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, "test-video-8cg.mp4")
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
+            put(MediaStore.Video.Media.DURATION, 1000L)
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)!!
+        resolver.openOutputStream(uri)!!.use { out ->
+            // Dummy payload: ExoPlayer must reject it and the viewer must show
+            // its error state instead of crashing on a black screen.
+            out.write(byteArrayOf(0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70))
+        }
+        values.clear()
+        values.put(MediaStore.Video.Media.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        try {
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
+            }
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithContentDescription("test-video-8cg.mp4")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("test-video-8cg.mp4").performClick()
+            composeRule.waitUntil(timeoutMillis = 20000) {
+                val hasPlayer =
+                    composeRule.onAllNodesWithContentDescription("Mute").fetchSemanticsNodes().isNotEmpty() ||
+                    composeRule.onAllNodesWithContentDescription("Unmute").fetchSemanticsNodes().isNotEmpty()
+                val hasError =
+                    composeRule.onAllNodesWithText("can't be played", substring = true)
+                        .fetchSemanticsNodes().isNotEmpty()
+                hasPlayer || hasError
+            }
+        } finally {
+            resolver.delete(uri, null, null)
+        }
+    }
+
+    @Test
     fun gridScrollsWith41kSyntheticItems() {
         val vm = ViewModelProvider(composeRule.activity)[GalleryViewModel::class.java]
         composeRule.waitUntil(timeoutMillis = 20000) { !vm.loading.value }

@@ -38,6 +38,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -53,8 +55,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.net.Uri
-import android.widget.MediaController
-import android.widget.VideoView
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import app.eightcloud.gallery.data.MediaDetails
 import app.eightcloud.gallery.data.MediaItem
 import coil.compose.AsyncImage
@@ -165,7 +167,7 @@ fun ViewerScreen(viewModel: GalleryViewModel) {
             ) { page ->
                 val item = items[page]
                 if (item.isVideo) {
-                    VideoPage(item)
+                    VideoPage(item, isActive = pagerState.currentPage == page)
                 } else {
                     PhotoPage(item)
                 }
@@ -257,18 +259,71 @@ private fun PhotoPage(item: MediaItem) {
 }
 
 @Composable
-private fun VideoPage(item: MediaItem) {
-    AndroidView(
-        factory = { context ->
-            VideoView(context).apply {
-                setVideoURI(Uri.parse(item.uri))
-                val controller = MediaController(context)
-                controller.setAnchorView(this)
-                setMediaController(controller)
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun VideoPage(item: MediaItem, isActive: Boolean, onEnded: () -> Unit = {}) {
+    val context = LocalContext.current
+    var errorMessage by remember(item.id) { mutableStateOf<String?>(null) }
+    var muted by remember(item.id) { mutableStateOf(false) }
+    val player = remember(item.id) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(item.uri)))
+            prepare()
+        }
+    }
+    DisposableEffect(item.id) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                errorMessage = error.errorCodeName
+                app.eightcloud.gallery.AppLog.log("video", "playback error for " + item.name + ": " + error.errorCodeName)
             }
-        },
-        modifier = Modifier.fillMaxSize()
-    )
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_ENDED) onEnded()
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.release() }
+    }
+    LaunchedEffect(isActive) {
+        if (isActive && errorMessage == null) player.play() else player.pause()
+    }
+    LaunchedEffect(muted) { player.volume = if (muted) 0f else 1f }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            factory = { ctx ->
+                androidx.media3.ui.StyledPlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    controllerAutoShow = true
+                    setShowBuffering(androidx.media3.ui.StyledPlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+        IconButton(
+            onClick = { muted = !muted },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(70.dp, 8.dp, 8.dp, 8.dp)
+        ) {
+            Icon(
+                imageVector = if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                contentDescription = if (muted) "Unmute" else "Mute",
+                tint = Color.White
+            )
+        }
+        errorMessage?.let { msg ->
+            Text(
+                "This video can't be played ($msg)",
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp)
+            )
+        }
+    }
 }
 
 @Composable
