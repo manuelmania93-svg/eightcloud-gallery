@@ -225,6 +225,7 @@ fun EightCloudApp() {
                             Screen.STORAGE_STATS -> StorageStatsScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.CLEANUP -> CleanupScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.SLIDESHOW -> SlideshowScreen(viewModel, onBack = { viewModel.backToGrid() })
+                            Screen.EDIT -> EditScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.SECURE -> SecureFolderScreen(
                                 viewModel,
                                 onBack = { viewModel.backToGrid() },

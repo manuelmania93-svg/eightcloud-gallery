@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
@@ -112,6 +113,11 @@ fun ViewerScreen(viewModel: GalleryViewModel) {
                     itemStatus == app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY
                 val cloudOnlyHidden = itemStatus == app.eightcloud.gallery.backup.BackupEntry.CLOUD_ONLY &&
                     featureToggles["feat_cloud_share"] == false
+                if (!currentItem.isVideo) {
+                    IconButton(onClick = { viewModel.openEdit(currentItem) }) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Color.White)
+                    }
+                }
                 if (!cloudOnlyHidden) IconButton(
                     enabled = !sharing,
                     onClick = {

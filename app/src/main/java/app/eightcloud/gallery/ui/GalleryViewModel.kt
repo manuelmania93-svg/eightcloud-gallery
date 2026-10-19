@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP, SLIDESHOW, SECURE }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE, STORAGE_STATS, CLEANUP, SLIDESHOW, SECURE, EDIT }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 data class SmartAlbum(val key: String, val title: String, val count: Int)
@@ -381,6 +381,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         gridAnchorId = null
         gridAnchorOffset = 0
         applyView()
+    }
+
+    /** Photo currently open in the editor (session state lives in EditScreen). */
+    var editItem: MediaItem? = null
+        private set
+
+    fun openEdit(item: MediaItem) {
+        editItem = item
+        _screen.value = Screen.EDIT
     }
 
     fun openViewer(index: Int) {
