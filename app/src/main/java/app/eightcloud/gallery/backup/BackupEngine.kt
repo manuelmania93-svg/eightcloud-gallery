@@ -556,7 +556,7 @@ class BackupEngine(private val context: Context) {
      * Returns the number of files imported.
      */
     suspend fun rebuildIndexFromCloud(maxPages: Int = 20): Int = withContext(Dispatchers.IO) {
-        val captionRe = Regex("^([0-9a-f]{12}) (.+?)(?: \[part (\d+)/(\d+)\])?$")
+        val captionRe = Regex("""^([0-9a-f]{12}) (.+?)(?: \[part (\d+)/(\d+)\])?$""")
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         val chatId = destinationChat()
         val toGroup = prefs.getLong("destChatId", 0L) != 0L
