@@ -600,7 +600,13 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
         )
 
         if (showBubble) {
-            val label = bubbleLabelOf(entries.getOrNull(gridState.firstVisibleItemIndex), field)
+            // Label the item at the exact drag position, not whatever happens
+            // to be visible first - the visible window lags behind the thumb
+            // while dragging, which showed a wrong/stale date.
+            val labelIndex = dragOffsetPx
+                ?.let { ((it / trackHeightPx) * (total - 1)).roundToInt().coerceIn(0, total - 1) }
+                ?: gridState.firstVisibleItemIndex
+            val label = bubbleLabelOf(entries.getOrNull(labelIndex), field)
             androidx.compose.material3.Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(12.dp),
