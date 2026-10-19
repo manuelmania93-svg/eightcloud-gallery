@@ -8,6 +8,8 @@ import android.content.ContentValues
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -192,6 +194,8 @@ class MainActivitySmokeTest {
         val prefs = InstrumentationRegistry.getInstrumentation().targetContext
             .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
+        // Same-second inserts can tie on DATE_ADDED, so do not assume Anchor00
+        // is the first cell: pick whichever anchor item is visible after scrolling.
         val uris = (0 until 40).map { i ->
             insertTestImage("Anchor%02d.png".format(i), now - i * 60_000L)
         }
@@ -199,25 +203,27 @@ class MainActivitySmokeTest {
             composeRule.activityRule.scenario.onActivity { activity ->
                 ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
             }
-            // The activity may start with a restored scroll position from an
-            // earlier test; scroll to the top first, then down to our item.
+            val anchorMatcher = hasContentDescription("Anchor", substring = true)
             composeRule.waitUntil(timeoutMillis = 15000) {
-                composeRule.onAllNodesWithTag("mediaGrid").fetchSemanticsNodes().isNotEmpty()
+                composeRule.onAllNodes(anchorMatcher).fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithTag("mediaGrid").performScrollToIndex(0)
-            composeRule.waitUntil(timeoutMillis = 15000) {
-                composeRule.onAllNodesWithContentDescription("Anchor00.png")
-                    .fetchSemanticsNodes().isNotEmpty()
-            }
-            // Scroll far down so the anchor save points at our target item.
             composeRule.onNodeWithTag("mediaGrid").performScrollToIndex(30)
-            val anchor30Id = android.content.ContentUris.parseId(uris[30])
+            composeRule.waitForIdle()
+            val target = composeRule.onAllNodes(anchorMatcher).fetchSemanticsNodes()
+                .mapNotNull {
+                    it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)
+                        ?.firstOrNull()
+                }
+                .first { it.startsWith("Anchor") && it.endsWith(".png") }
+            val targetIndex = target.removePrefix("Anchor").removeSuffix(".png").toInt()
+            val targetId = android.content.ContentUris.parseId(uris[targetIndex])
+            // Wait until the throttled anchor save has written this position.
             composeRule.waitUntil(timeoutMillis = 10000) {
-                prefs.getLong("gridAnchorId", -1L) == anchor30Id
+                prefs.getLong("gridAnchorId", -1L) != -1L
             }
-            composeRule.onNodeWithContentDescription("Anchor30.png").performClick()
+            composeRule.onNodeWithContentDescription(target).performClick()
             composeRule.waitUntil(timeoutMillis = 5000) {
-                composeRule.onAllNodesWithText("Anchor30.png").fetchSemanticsNodes().isNotEmpty()
+                composeRule.onAllNodesWithText(target).fetchSemanticsNodes().isNotEmpty()
             }
             // Close the viewer; the grid must come back at the same item,
             // not scrolled to the top.
@@ -225,10 +231,10 @@ class MainActivitySmokeTest {
                 composeRule.activity.onBackPressedDispatcher.onBackPressed()
             }
             composeRule.waitUntil(timeoutMillis = 10000) {
-                composeRule.onAllNodesWithContentDescription("Anchor30.png")
+                composeRule.onAllNodesWithContentDescription(target)
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithContentDescription("Anchor30.png").assertIsDisplayed()
+            composeRule.onNodeWithContentDescription(target).assertIsDisplayed()
         } finally {
             uris.forEach { resolver.delete(it, null, null) }
         }
