@@ -183,13 +183,18 @@ class MainActivitySmokeTest {
             }
             composeRule.onNodeWithContentDescription("Add favorite").performClick()
             composeRule.onNodeWithContentDescription("Remove favorite").assertIsDisplayed()
-            val dir = java.io.File(context.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
-            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation
-                .takeScreenshot().also { bitmap ->
-                    java.io.File(dir, "favorite-grid.png").outputStream().use {
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
-                    }
+            val shot = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+                .uiAutomation.takeScreenshot()
+            val cv = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, "ui-favorite-grid.png")
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/8cg-ui")
+            }
+            context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv)?.let { u ->
+                context.contentResolver.openOutputStream(u)?.use {
+                    shot.compress(Bitmap.CompressFormat.PNG, 100, it)
                 }
+            }
             composeRule.onNodeWithContentDescription("Remove favorite").performClick()
             composeRule.onNodeWithContentDescription("Add favorite").assertIsDisplayed()
         } finally {
