@@ -2,7 +2,7 @@ package app.eightcloud.gallery
 
 import coil.Coil
 import coil.ImageLoader
-import coil.decode.VideoFrameDecoderFactory
+import coil.video.VideoFrameDecoderFactory
 
 import android.Manifest
 import android.content.pm.PackageManager
