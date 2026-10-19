@@ -19,7 +19,6 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.eightcloud.gallery.telegram.TdClient
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import java.util.concurrent.TimeUnit
@@ -42,7 +41,8 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 // speed, ETA, pause state); this collector owns the notification.
                 val notifier = launch {
                     var lastPosted = 0L
-                    BackupProgress.state.conflate().collect { s ->
+                    // StateFlow already conflates to the latest value.
+                    BackupProgress.state.collect { s ->
                         val now = System.currentTimeMillis()
                         // Post at most once per second; the system caps us anyway.
                         if (s.running && now - lastPosted >= 1_000) {
