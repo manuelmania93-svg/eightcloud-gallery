@@ -207,6 +207,28 @@ data class FaceEntity(
     val personId: Long
 )
 
+/** CLIP image embedding per item (512 float32, L2-normalized), for re-scoring without rescanning. */
+@Entity(tableName = "clip_embeddings")
+data class ClipEmbedding(
+    @PrimaryKey val mediaStoreId: Long,
+    val embedding: ByteArray
+)
+
+@Dao
+interface ClipDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: ClipEmbedding)
+
+    @Query("SELECT * FROM clip_embeddings WHERE mediaStoreId > :after ORDER BY mediaStoreId LIMIT :limit")
+    suspend fun page(after: Long, limit: Int): List<ClipEmbedding>
+
+    @Query("SELECT * FROM clip_embeddings WHERE mediaStoreId IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<ClipEmbedding>
+
+    @Query("SELECT mediaStoreId FROM clip_embeddings")
+    suspend fun allIds(): List<Long>
+}
+
 /** Images already processed by the face grouper (even when no face was found again). */
 @Entity(tableName = "face_scans")
 data class FaceScan(
@@ -284,7 +306,7 @@ interface GeoDao {
     suspend fun locatedCount(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class, Person::class, FaceEntity::class, FaceScan::class], version = 10, exportSchema = false)
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class, Person::class, FaceEntity::class, FaceScan::class, ClipEmbedding::class], version = 11, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
@@ -294,6 +316,7 @@ abstract class BackupDb : RoomDatabase() {
     abstract fun personDao(): PersonDao
     abstract fun faceDao(): FaceDao
     abstract fun faceScanDao(): FaceScanDao
+    abstract fun clipDao(): ClipDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -379,6 +402,16 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS clip_embeddings (" +
+                        "mediaStoreId INTEGER NOT NULL PRIMARY KEY, " +
+                        "embedding BLOB NOT NULL)"
+                )
+            }
+        }
+
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE backup_index ADD COLUMN keyTag TEXT NOT NULL DEFAULT 'ks'")
@@ -410,7 +443,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11).build().also { instance = it }
         }
     }
 }

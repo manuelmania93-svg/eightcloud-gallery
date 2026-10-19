@@ -24,15 +24,17 @@ import kotlinx.coroutines.tasks.await
 class MediaScanner(private val context: Context) {
 
     companion object {
-        const val CURRENT_SCAN_VERSION = 2
+        const val CURRENT_SCAN_VERSION = 3
     }
 
     private val faceDetector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+            .setMinFaceSize(0.05f)
             .build()
     )
     private val nsfwScorer by lazy { NsfwScorer(context) }
+    private val clipScorer by lazy { ClipScorer(context) }
 
     // Lower capture threshold; per-category thresholds live in Categories.
     private val labeler = ImageLabeling.getClient(
@@ -84,6 +86,11 @@ class MediaScanner(private val context: Context) {
         val labels = runCatching { labeler.process(image).await() }.getOrNull()
         val ocr = runCatching { textRecognizer.process(image).await() }.getOrNull()
         val nsfw = nsfwScorer.score(bitmap)
+        val clipEmb = clipScorer.embed(bitmap)
+        if (clipEmb != null) {
+            BackupDb.get(context).clipDao()
+                .upsert(app.eightcloud.gallery.backup.ClipEmbedding(mediaStoreId, ClipPrompts.toBlob(clipEmb)))
+        }
         val imageArea = bitmap.width.toFloat() * bitmap.height.toFloat()
         val maxFaceRatio = faces?.maxOfOrNull { f ->
             val box = f.boundingBox
@@ -97,9 +104,12 @@ class MediaScanner(private val context: Context) {
             scannedAt = System.currentTimeMillis(),
             faceMaxRatio = maxFaceRatio,
             ocrChars = ocr?.text?.count { !it.isWhitespace() } ?: 0,
-            labelConfs = labels?.joinToString(",") {
-                it.text + ":" + String.format(java.util.Locale.US, "%.2f", it.confidence)
-            } ?: "",
+            labelConfs = ClipPrompts.mergeIntoLabelConfs(
+                labels?.joinToString(",") {
+                    it.text + ":" + String.format(java.util.Locale.US, "%.2f", it.confidence)
+                } ?: "",
+                if (clipEmb != null) clipScorer.prompts.scores(clipEmb) else emptyMap()
+            ),
             scanVersion = CURRENT_SCAN_VERSION
         )
         BackupDb.get(context).mediaLabelDao().upsert(entry)

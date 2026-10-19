@@ -33,6 +33,13 @@ object Categories {
     private const val FACE_RATIO_SINGLE = 0.01f
     private const val FACE_RATIO_GROUP = 0.003f
 
+    // CLIP zero-shot shares (softmax mass of a category's prompts). Tuned with the
+    // info-sheet debug view; scene shares split between similar categories, so they sit low.
+    private const val CLIP_SCENE = 0.35f
+    private const val CLIP_PEOPLE = 0.4f
+    private const val CLIP_DOCUMENT = 0.5f
+    private const val CLIP_ML_OVERRIDE = 0.92f
+
     // Documents: real OCR text on a camera photo.
     private const val DOC_MIN_OCR_CHARS = 150
 
@@ -89,7 +96,15 @@ object Categories {
         isScreenshot: Boolean,
         cameraBucket: Boolean
     ): Set<String> {
-        val confs = parseConfs(labelConfs)
+        val all = parseConfs(labelConfs)
+        // CLIP zero-shot masses are stored as "~category:share" pseudo-labels.
+        val clip = all.filter { it.first.startsWith("~") }.associate { it.first.substring(1) to it.second }
+        val confs = all.filter { !it.first.startsWith("~") }
+        val hasClip = clip.isNotEmpty()
+        fun clipHit(key: String, threshold: Float) = (clip[key] ?: 0f) >= threshold
+        fun scene(vocab: Set<String>, strong: Float, medium: Float, key: String, threshold: Float): Boolean =
+            if (hasClip) clipHit(key, threshold) || confs.any { it.first in vocab && it.second >= CLIP_ML_OVERRIDE }
+            else voted(confs, vocab, strong, medium)
         val out = mutableSetOf<String>()
 
         // People: meaningful faces only. Legacy rows (no ratio stored yet)
@@ -98,20 +113,22 @@ object Categories {
             (faceCount >= 2 && faceMaxRatio >= FACE_RATIO_GROUP) ||
             (faceMaxRatio == 0f && faceCount > 0)
         ) out += PEOPLE
+        if (!isScreenshot && clipHit("people", CLIP_PEOPLE)) out += PEOPLE
 
         if (nsfwScore >= NSFW_THRESHOLD) out += ADULT
 
         if (!isScreenshot) {
-            if (voted(confs, OUTDOOR_LABELS, 0.75f, 0.6f)) out += OUTDOOR
-            if (voted(confs, FOOD_LABELS, 0.8f, 0.65f)) out += FOOD
-            if (voted(confs, ANIMAL_LABELS, 0.8f, 0.65f)) out += ANIMALS
-            if (voted(confs, CAR_LABELS, 0.8f, 0.65f)) out += CARS
-            if (voted(confs, NIGHT_LABELS, 0.85f, 0.7f)) out += NIGHT
-            if (voted(confs, BEACH_LABELS, 0.75f, 0.6f)) out += BEACH
+            if (scene(OUTDOOR_LABELS, 0.75f, 0.6f, "outdoor", CLIP_SCENE)) out += OUTDOOR
+            if (scene(FOOD_LABELS, 0.8f, 0.65f, "food", CLIP_SCENE)) out += FOOD
+            if (scene(ANIMAL_LABELS, 0.8f, 0.65f, "animals", CLIP_SCENE)) out += ANIMALS
+            if (scene(CAR_LABELS, 0.8f, 0.65f, "cars", CLIP_SCENE)) out += CARS
+            if (scene(NIGHT_LABELS, 0.85f, 0.7f, "night", CLIP_SCENE)) out += NIGHT
+            if (scene(BEACH_LABELS, 0.75f, 0.6f, "beach", CLIP_SCENE)) out += BEACH
         }
 
         // Documents: a camera photo with lots of real OCR-verified text.
         if (cameraBucket && ocrChars >= DOC_MIN_OCR_CHARS) out += DOCUMENTS
+        if (!isScreenshot && clipHit("document", CLIP_DOCUMENT) && ocrChars >= 20) out += DOCUMENTS
 
         // Memes: screenshots carrying real text (posts, chat screenshots).
         if (isScreenshot && ocrChars >= MEME_MIN_OCR_CHARS) out += MEMES

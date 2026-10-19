@@ -1,0 +1,52 @@
+people|a photo of a person
+people|a selfie
+people|a group of people posing for a photo
+people|a close-up portrait of a face
+people|a photo of a family
+people|a group of people playing a sport
+people|people at a party or event
+people|a child or a baby
+food|a photo of food
+food|a plate of food on a table
+food|a meal at a restaurant
+food|a dessert
+food|a drink in a glass
+food|a pizza
+food|a burger
+animals|a photo of an animal
+animals|a photo of a dog
+animals|a photo of a cat
+animals|a photo of a bird
+animals|a photo of a horse
+animals|a photo of wildlife
+cars|a photo of a car
+cars|a photo of a motorcycle
+cars|a vehicle on the road
+cars|a sports car
+outdoor|a landscape photo of nature
+outdoor|a mountain landscape
+outdoor|a forest with trees
+outdoor|a lake or a river
+outdoor|the sky with clouds
+outdoor|a flower
+beach|a photo of a beach
+beach|the sea and sand
+beach|waves on the ocean shore
+night|a photo taken at night
+night|a dark night scene with city lights
+night|a night sky with stars
+document|a photo of a paper document
+document|a page of printed text
+document|a receipt or an invoice
+document|a whiteboard with writing
+other|a photo of a room indoors
+other|a photo of a building
+other|a photo of a street in a city
+other|a photo of an object on a table
+other|a screenshot of a phone app
+other|a drawing or a cartoon
+other|a photo of a product
+other|a blurry photo
+other|an airplane or an airport
+other|a photo of furniture
+other|a photo of a computer or a screen

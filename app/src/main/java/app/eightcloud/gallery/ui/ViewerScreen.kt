@@ -478,9 +478,28 @@ private fun InfoPanel(viewModel: GalleryViewModel, item: MediaItem, modifier: Mo
                     if (confPairs.isNotEmpty()) {
                         infoRow(
                             "Labels",
-                            confPairs.take(8).joinToString(", ") {
+                            confPairs.filter { !it.first.startsWith("~") }.take(8).joinToString(", ") {
                                 it.first + " " + (it.second * 100).toInt() + "%"
                             }
+                        )
+                    }
+                    val clipShares = confPairs.filter { it.first.startsWith("~") && it.second >= 0.05f }
+                        .sortedByDescending { it.second }
+                    if (clipShares.isNotEmpty()) {
+                        infoRow(
+                            "CLIP shares",
+                            clipShares.joinToString(", ") {
+                                it.first.substring(1) + " " + (it.second * 100).toInt() + "%"
+                            }
+                        )
+                    }
+                    val clipTop by androidx.compose.runtime.produceState<List<Pair<String, Float>>?>(
+                        null, item.id, entry.labelConfs
+                    ) { value = viewModel.clipTop(item.id) }
+                    clipTop?.let { top ->
+                        infoRow(
+                            "Top 3 matches",
+                            top.joinToString("; ") { it.first + " " + (it.second * 100).toInt() + "%" }
                         )
                     }
                     if (entry.faceCount > 0) {

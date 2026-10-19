@@ -499,6 +499,71 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 computeCategoryAlbums()
                 applyView()
             }
+            rescoreClip()
+        }
+    }
+
+    private var clipPromptsCache: app.eightcloud.gallery.labels.ClipPrompts? = null
+
+    private fun clipPrompts(): app.eightcloud.gallery.labels.ClipPrompts =
+        clipPromptsCache ?: app.eightcloud.gallery.labels.ClipPrompts.load(getApplication())
+            .also { clipPromptsCache = it }
+
+    /** Top-3 CLIP prompts for one item (info-sheet debug view); null when no embedding yet. */
+    suspend fun clipTop(mediaStoreId: Long): List<Pair<String, Float>>? = withContext(Dispatchers.IO) {
+        val row = app.eightcloud.gallery.backup.BackupDb.get(getApplication()).clipDao()
+            .byIds(listOf(mediaStoreId)).firstOrNull() ?: return@withContext null
+        clipPrompts().top(app.eightcloud.gallery.labels.ClipPrompts.fromBlob(row.embedding), 3)
+    }
+
+    /**
+     * Recomputes the CLIP category shares from the stored embeddings. Photos that
+     * look like one the user rejected ("Not this category") lose that category.
+     */
+    fun rescoreClip() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ClipPrompts = app.eightcloud.gallery.labels.ClipPrompts
+            val db = app.eightcloud.gallery.backup.BackupDb.get(getApplication())
+            val clipDao = db.clipDao()
+            val prompts = clipPrompts()
+            val rejected = _categoryOverrides.value
+                .mapValues { e -> e.value.filterValues { it }.keys.toList() }
+                .filterValues { it.isNotEmpty() }
+            val negatives = mutableMapOf<String, MutableList<FloatArray>>()
+            rejected.keys.toList().chunked(500).forEach { chunk ->
+                clipDao.byIds(chunk).forEach { row ->
+                    val emb = ClipPrompts.fromBlob(row.embedding)
+                    rejected[row.mediaStoreId]?.forEach { cat ->
+                        negatives.getOrPut(cat) { mutableListOf() }.add(emb)
+                    }
+                }
+            }
+            var after = Long.MIN_VALUE
+            var changedTotal = 0
+            while (true) {
+                val page = clipDao.page(after, 1000)
+                if (page.isEmpty()) break
+                after = page.last().mediaStoreId
+                val labels = _mediaLabels.value
+                val updates = mutableListOf<app.eightcloud.gallery.backup.MediaLabelEntry>()
+                for (row in page) {
+                    val entry = labels[row.mediaStoreId] ?: continue
+                    val scores = prompts.scores(ClipPrompts.fromBlob(row.embedding), negatives)
+                    val merged = ClipPrompts.mergeIntoLabelConfs(entry.labelConfs, scores)
+                    if (merged != entry.labelConfs) updates += entry.copy(labelConfs = merged)
+                }
+                if (updates.isNotEmpty()) {
+                    updates.forEach { db.mediaLabelDao().upsert(it) }
+                    _mediaLabels.value = _mediaLabels.value + updates.associateBy { it.mediaStoreId }
+                    changedTotal += updates.size
+                }
+            }
+            if (changedTotal > 0) {
+                withContext(Dispatchers.Main) {
+                    computeCategoryAlbums()
+                    applyView()
+                }
+            }
         }
     }
 
@@ -669,6 +734,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 computeCategoryAlbums()
             }
             _labelScanProgress.value = null
+            rescoreClip()
             if (_autoSecureSensitive.value) moveToSecure(sensitiveNotSecure())
             applyView()
         }
