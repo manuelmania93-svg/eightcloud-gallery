@@ -11,7 +11,5 @@ data class MediaItem(
     val height: Int,
     val durationMs: Long,
     val bucket: String,
-    val mimeType: String,
-    val latitude: Double? = null,
-    val longitude: Double? = null
+    val mimeType: String
 )

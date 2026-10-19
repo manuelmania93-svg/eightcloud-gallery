@@ -223,6 +223,55 @@ class MainActivitySmokeTest {
     }
 
     @Test
+    fun mapFindsPhotoWithGpsExif() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "GeoPhoto.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
+        resolver.openOutputStream(uri)!!.use { out ->
+            val bmp = android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888)
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+        }
+        // Write GPS EXIF (Vienna) into the file itself.
+        resolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
+            val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+            exif.setLatLong(48.2082, 16.3738)
+            exif.saveAttributes()
+        }
+        values.clear()
+        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        val id = android.content.ContentUris.parseId(uri)
+        try {
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
+            }
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithContentDescription("GeoPhoto.jpg")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].scanGeo()
+            }
+            composeRule.waitUntil(timeoutMillis = 20000) {
+                var found = false
+                composeRule.activityRule.scenario.onActivity { activity ->
+                    val vm = ViewModelProvider(activity)[GalleryViewModel::class.java]
+                    found = vm.geoPoints.value.any { it.mediaStoreId == id }
+                }
+                found
+            }
+        } finally {
+            resolver.delete(uri, null, null)
+        }
+    }
+
+    @Test
     fun viewerCloseRestoresGridPosition() {
         val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
         val prefs = InstrumentationRegistry.getInstrumentation().targetContext

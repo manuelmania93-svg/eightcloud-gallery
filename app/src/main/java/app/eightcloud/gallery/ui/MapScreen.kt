@@ -32,12 +32,16 @@ import org.osmdroid.views.overlay.Marker
 fun MapScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val items by viewModel.items.collectAsState()
-    val geoItems = items.filter { it.latitude != null && it.longitude != null }
+    val geoPoints by viewModel.geoPoints.collectAsState()
+    val geoScanning by viewModel.geoScanning.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.scanGeo() }
+    val byId = items.associateBy { it.id }
+    val geoItems = geoPoints.mapNotNull { p -> byId[p.mediaStoreId]?.let { it to p } }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Map (${geoItems.size} photos)") },
+                title = { Text("Map (${geoItems.size} photos" + (if (geoScanning) ", scanning..." else "") + ")") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -46,7 +50,7 @@ fun MapScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
             )
         }
     ) { innerPadding ->
-        if (geoItems.isEmpty()) {
+        if (geoItems.isEmpty() && !geoScanning) {
             Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                 Text(
                     "No photos with location data yet.",
@@ -64,18 +68,16 @@ fun MapScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
                     MapView(ctx).apply {
                         setTileSource(TileSourceFactory.MAPNIK)
                         setMultiTouchControls(true)
-                        val points = geoItems.map {
-                            GeoPoint(it.latitude!!, it.longitude!!)
-                        }
+                        val points = geoItems.map { (_, p) -> GeoPoint(p.lat, p.lon) }
                         val center = GeoPoint(
                             points.map { it.latitude }.average(),
                             points.map { it.longitude }.average()
                         )
                         controller.setZoom(6.0)
                         controller.setCenter(center)
-                        geoItems.forEach { item ->
+                        geoItems.forEach { (item, p) ->
                             val marker = Marker(this)
-                            marker.position = GeoPoint(item.latitude!!, item.longitude!!)
+                            marker.position = GeoPoint(p.lat, p.lon)
                             marker.title = item.name
                             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                             marker.setOnMarkerClickListener { _, _ ->
@@ -87,7 +89,28 @@ fun MapScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
                         }
                     }
                 },
-                modifier = Modifier.fillMaxSize().padding(innerPadding)
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                update = { map ->
+                    map.overlays.clear()
+                    geoItems.forEach { (item, p) ->
+                        val marker = Marker(map)
+                        marker.position = GeoPoint(p.lat, p.lon)
+                        marker.title = item.name
+                        marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        marker.setOnMarkerClickListener { _, _ ->
+                            val idx = viewModel.items.value.indexOfFirst { it.id == item.id }
+                            if (idx >= 0) viewModel.openViewer(idx)
+                            true
+                        }
+                        map.overlays.add(marker)
+                    }
+                    if (geoItems.isNotEmpty()) {
+                        val lats = geoItems.map { it.second.lat }
+                        val lons = geoItems.map { it.second.lon }
+                        map.controller.setCenter(GeoPoint(lats.average(), lons.average()))
+                    }
+                    map.invalidate()
+                }
             )
         }
     }

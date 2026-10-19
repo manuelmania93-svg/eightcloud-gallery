@@ -139,11 +139,36 @@ interface MediaLabelDao {
     suspend fun delete(id: Long)
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class], version = 5, exportSchema = false)
+/** EXIF GPS cache per media item (map view). lat/lon NULL = scanned, no GPS. */
+@Entity(tableName = "geo_entries")
+data class GeoEntry(
+    @PrimaryKey val mediaStoreId: Long,
+    val latitude: Double?,
+    val longitude: Double?,
+    val scannedAt: Long
+)
+
+@Dao
+interface GeoDao {
+    @Query("SELECT * FROM geo_entries WHERE latitude IS NOT NULL")
+    suspend fun withLocation(): List<GeoEntry>
+
+    @Query("SELECT mediaStoreId FROM geo_entries")
+    suspend fun scannedIds(): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entries: List<GeoEntry>)
+
+    @Query("SELECT COUNT(*) FROM geo_entries WHERE latitude IS NOT NULL")
+    suspend fun locatedCount(): Int
+}
+
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class], version = 6, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
     abstract fun mediaLabelDao(): MediaLabelDao
+    abstract fun geoDao(): GeoDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -154,6 +179,18 @@ abstract class BackupDb : RoomDatabase() {
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE backup_index ADD COLUMN partChecksums TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS geo_entries (" +
+                        "mediaStoreId INTEGER NOT NULL PRIMARY KEY, " +
+                        "latitude REAL, " +
+                        "longitude REAL, " +
+                        "scannedAt INTEGER NOT NULL)"
+                )
             }
         }
 
@@ -189,7 +226,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
         }
     }
 }

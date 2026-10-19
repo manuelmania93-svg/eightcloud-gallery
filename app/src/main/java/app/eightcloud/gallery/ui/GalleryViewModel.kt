@@ -394,6 +394,28 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun openMap() { _screen.value = Screen.MAP }
 
+    // Map: EXIF GPS points, scanned incrementally in the background.
+    private val _geoPoints = MutableStateFlow<List<app.eightcloud.gallery.data.GeoIndex.Point>>(emptyList())
+    val geoPoints: StateFlow<List<app.eightcloud.gallery.data.GeoIndex.Point>> = _geoPoints
+    private val _geoScanning = MutableStateFlow(false)
+    val geoScanning: StateFlow<Boolean> = _geoScanning
+    private var geoScanJob: kotlinx.coroutines.Job? = null
+
+    fun scanGeo() {
+        if (geoScanJob?.isActive == true) return
+        geoScanJob = viewModelScope.launch {
+            _geoScanning.value = true
+            _geoPoints.value = app.eightcloud.gallery.data.GeoIndex.located(getApplication())
+            while (true) {
+                val done = app.eightcloud.gallery.data.GeoIndex.scanBatch(getApplication(), allItems)
+                if (done > 0) {
+                    _geoPoints.value = app.eightcloud.gallery.data.GeoIndex.located(getApplication())
+                } else break
+            }
+            _geoScanning.value = false
+        }
+    }
+
     /**
      * Rename the real file through MediaStore and update the cloud index
      * in place (the content hash does not change, so nothing re-uploads).
