@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "8CloudGallery"
-include(":app")
+rootProject.name = "8CloudVlmTest"
+include(":vlmtest")
