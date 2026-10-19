@@ -2,7 +2,7 @@ package app.eightcloud.gallery
 
 import coil.Coil
 import coil.ImageLoader
-import coil.video.VideoFrameDecoderFactory
+import coil.decode.VideoFrameDecoder
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
         // VideoFrameDecoder so video thumbnails actually render in the grid.
         Coil.setImageLoader(
             ImageLoader.Builder(this)
-                .components { add(VideoFrameDecoderFactory()) }
+                .components { add(VideoFrameDecoder.Factory()) }
                 .build()
         )
         setContent {
