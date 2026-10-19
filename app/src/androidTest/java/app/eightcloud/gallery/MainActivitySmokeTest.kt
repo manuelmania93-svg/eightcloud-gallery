@@ -182,6 +182,8 @@ class MainActivitySmokeTest {
     @Test
     fun viewerCloseRestoresGridPosition() {
         val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val prefs = InstrumentationRegistry.getInstrumentation().targetContext
+            .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         val uris = (0 until 40).map { i ->
             insertTestImage("Anchor%02d.png".format(i), now - i * 60_000L)
@@ -190,13 +192,22 @@ class MainActivitySmokeTest {
             composeRule.activityRule.scenario.onActivity { activity ->
                 ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
             }
+            // The activity may start with a restored scroll position from an
+            // earlier test; scroll to the top first, then down to our item.
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithTag("mediaGrid").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("mediaGrid").performScrollToIndex(0)
             composeRule.waitUntil(timeoutMillis = 15000) {
                 composeRule.onAllNodesWithContentDescription("Anchor00.png")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            // Scroll far down and open an item that is off the first screen.
+            // Scroll far down so the anchor save points at our target item.
             composeRule.onNodeWithTag("mediaGrid").performScrollToIndex(30)
-            composeRule.waitForIdle()
+            val anchor30Id = android.content.ContentUris.parseId(uris[30])
+            composeRule.waitUntil(timeoutMillis = 10000) {
+                prefs.getLong("gridAnchorId", -1L) == anchor30Id
+            }
             composeRule.onNodeWithContentDescription("Anchor30.png").performClick()
             composeRule.waitUntil(timeoutMillis = 5000) {
                 composeRule.onAllNodesWithText("Anchor30.png").fetchSemanticsNodes().isNotEmpty()
@@ -206,7 +217,7 @@ class MainActivitySmokeTest {
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
                 composeRule.activity.onBackPressedDispatcher.onBackPressed()
             }
-            composeRule.waitUntil(timeoutMillis = 5000) {
+            composeRule.waitUntil(timeoutMillis = 10000) {
                 composeRule.onAllNodesWithContentDescription("Anchor30.png")
                     .fetchSemanticsNodes().isNotEmpty()
             }
