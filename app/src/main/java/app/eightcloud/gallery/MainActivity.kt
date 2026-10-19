@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
 import app.eightcloud.gallery.ui.AlbumsScreen
 import app.eightcloud.gallery.ui.DuplicatesScreen
+import app.eightcloud.gallery.ui.EditScreen
 import app.eightcloud.gallery.ui.RestoreScreen
 import app.eightcloud.gallery.ui.TrashScreen
 import app.eightcloud.gallery.ui.BackupScreen
@@ -49,6 +50,7 @@ import app.eightcloud.gallery.ui.EightCloudTheme
 import app.eightcloud.gallery.ui.GalleryViewModel
 import app.eightcloud.gallery.ui.GridScreen
 import app.eightcloud.gallery.ui.Screen
+import app.eightcloud.gallery.ui.SecureFolderScreen
 import app.eightcloud.gallery.ui.SettingsScreen
 import app.eightcloud.gallery.ui.SlideshowScreen
 import app.eightcloud.gallery.ui.StorageStatsScreen
