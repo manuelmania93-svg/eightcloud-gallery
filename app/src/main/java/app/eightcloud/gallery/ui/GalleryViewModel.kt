@@ -38,6 +38,16 @@ internal fun confsOf(entry: app.eightcloud.gallery.backup.MediaLabelEntry): Stri
     if (entry.labelConfs.isNotBlank()) entry.labelConfs
     else entry.labels.split(",").filter { it.isNotBlank() }.joinToString(",") { "$it:0.70" }
 
+internal fun isSensitiveItem(
+    item: MediaItem,
+    labelsById: Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry>,
+    overrides: Map<Long, Map<String, Boolean>>
+): Boolean {
+    overrides[item.id]?.get("cat_adult")?.let { excluded -> return !excluded }
+    val entry = labelsById[item.id] ?: return false
+    return entry.nsfwScore >= app.eightcloud.gallery.labels.Categories.NSFW_THRESHOLD
+}
+
 internal fun matchesSmartAlbum(
     item: MediaItem,
     key: String,
@@ -657,6 +667,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 computeCategoryAlbums()
             }
             _labelScanProgress.value = null
+            if (_autoSecureSensitive.value) moveToSecure(sensitiveNotSecure())
+            applyView()
         }
     }
 
@@ -907,6 +919,35 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     /** Re-locks the app (screen off). No-op state change when lock is off. */
     fun lockApp() { _appUnlocked.value = false }
 
+    private val _hideSensitive = MutableStateFlow(prefs.getBoolean("hideSensitive", true))
+    val hideSensitive: StateFlow<Boolean> = _hideSensitive
+
+    fun setHideSensitive(enabled: Boolean) {
+        _hideSensitive.value = enabled
+        prefs.edit().putBoolean("hideSensitive", enabled).apply()
+        applyView()
+    }
+
+    private val _autoSecureSensitive = MutableStateFlow(prefs.getBoolean("autoSecureSensitive", false))
+    val autoSecureSensitive: StateFlow<Boolean> = _autoSecureSensitive
+
+    /** Ids of Sensitive items that are not in the Secure folder or trash yet. */
+    fun sensitiveNotSecure(): Set<Long> {
+        val labels = _mediaLabels.value
+        val overrides = _categoryOverrides.value
+        return allItems.filter {
+            it.id !in _secureIds.value && it.id !in _trashed.value &&
+                isSensitiveItem(it, labels, overrides)
+        }.map { it.id }.toSet()
+    }
+
+    /** Settings asks the user first, then calls this with the answer. */
+    fun setAutoSecureSensitive(enabled: Boolean, moveExisting: Boolean) {
+        _autoSecureSensitive.value = enabled
+        prefs.edit().putBoolean("autoSecureSensitive", enabled).apply()
+        if (enabled && moveExisting) moveToSecure(sensitiveNotSecure())
+    }
+
     private val _privacyScreen = MutableStateFlow(prefs.getBoolean("privacyScreen", false))
     val privacyScreen: StateFlow<Boolean> = _privacyScreen
 
@@ -1087,12 +1128,18 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val labelSnapshot = _mediaLabels.value
         val overrideSnapshot = _categoryOverrides.value
         val memoriesEnabled = _featureToggles.value["feat_on_this_day"] != false
-        val memories = _memories.value
+        val hideSensitive = _hideSensitive.value
+        val memories = if (hideSensitive) {
+            _memories.value.filter { !isSensitiveItem(it, labelSnapshot, overrideSnapshot) }
+        } else _memories.value
         val source = allItems
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 var base = if (trashed.isEmpty()) source else source.filter { !trashed.containsKey(it.id) }
                 if (secure.isNotEmpty()) base = base.filter { it.id !in secure }
+                if (hideSensitive && smart != "cat_adult") {
+                    base = base.filter { !isSensitiveItem(it, labelSnapshot, overrideSnapshot) }
+                }
                 var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
                 if (smart != null) view = view.filter {

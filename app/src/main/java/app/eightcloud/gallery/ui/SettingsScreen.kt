@@ -51,6 +51,9 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val duplicateGroups by viewModel.duplicateGroups.collectAsState()
     val appLock by viewModel.appLock.collectAsState()
     val privacyScreen by viewModel.privacyScreen.collectAsState()
+    val hideSensitive by viewModel.hideSensitive.collectAsState()
+    val autoSecureSensitive by viewModel.autoSecureSensitive.collectAsState()
+    var askAutoSecure by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
@@ -156,6 +159,91 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             androidx.compose.material3.Switch(
                 checked = privacyScreen,
                 onCheckedChange = { viewModel.setPrivacyScreen(it) }
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.setHideSensitive(!hideSensitive) }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VisibilityOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text("Hide Sensitive items", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Keep photos and videos the on-device scan marks Sensitive out of the grid, On this day and other albums. They stay in the Sensitive category.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = hideSensitive,
+                onCheckedChange = { viewModel.setHideSensitive(it) }
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    if (autoSecureSensitive) viewModel.setAutoSecureSensitive(false, false)
+                    else askAutoSecure = viewModel.sensitiveNotSecure().size + 1
+                }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VisibilityOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text("Move Sensitive to Secure folder", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "After each scan, move new Sensitive items into the Secure folder. Off by default.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = autoSecureSensitive,
+                onCheckedChange = {
+                    if (autoSecureSensitive) viewModel.setAutoSecureSensitive(false, false)
+                    else askAutoSecure = viewModel.sensitiveNotSecure().size + 1
+                }
+            )
+        }
+
+        if (askAutoSecure > 0) {
+            val existing = askAutoSecure - 1
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { askAutoSecure = 0 },
+                title = { Text("Move Sensitive items?") },
+                text = {
+                    Text(
+                        "$existing Sensitive items found so far. Move them to the Secure folder now? New ones will be moved after each scan. The scan is automatic and can be wrong; you can move items back from the Secure folder."
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        viewModel.setAutoSecureSensitive(true, true)
+                        askAutoSecure = 0
+                    }) { Text("Move") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        viewModel.setAutoSecureSensitive(true, false)
+                        askAutoSecure = 0
+                    }) { Text("Only new ones") }
+                }
             )
         }
 
