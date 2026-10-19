@@ -364,10 +364,10 @@ abstract class BackupDb : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS face_entities (" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                         "mediaStoreId INTEGER NOT NULL, " +
-                        "\`left\` REAL NOT NULL, " +
-                        "\`top\` REAL NOT NULL, " +
-                        "\`right\` REAL NOT NULL, " +
-                        "\`bottom\` REAL NOT NULL, " +
+                        "left REAL NOT NULL, " +
+                        "top REAL NOT NULL, " +
+                        "right REAL NOT NULL, " +
+                        "bottom REAL NOT NULL, " +
                         "embedding BLOB NOT NULL, " +
                         "personId INTEGER NOT NULL)"
                 )

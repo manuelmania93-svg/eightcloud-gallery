@@ -200,6 +200,7 @@ fun AlbumsScreen(viewModel: GalleryViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PersonRow(person: PersonAlbum, onClick: () -> Unit, onLongClick: () -> Unit) {
     Row(
