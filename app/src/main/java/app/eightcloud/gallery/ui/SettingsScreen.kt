@@ -52,6 +52,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val appLock by viewModel.appLock.collectAsState()
     val privacyScreen by viewModel.privacyScreen.collectAsState()
     val hideSensitive by viewModel.hideSensitive.collectAsState()
+    val scanOnlyWhileCharging by viewModel.scanOnlyWhileCharging.collectAsState()
     val autoSecureSensitive by viewModel.autoSecureSensitive.collectAsState()
     val settingsContext = androidx.compose.ui.platform.LocalContext.current
     var backupDocs by remember {
@@ -256,6 +257,33 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
                     settingsContext.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
                         .edit().putBoolean("backupDocuments", it).apply()
                 }
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.setScanOnlyWhileCharging(!scanOnlyWhileCharging) }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VisibilityOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text("Scan only while charging", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Big category scans (thousands of photos) wait until the phone is plugged in. Small scans always run.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = scanOnlyWhileCharging,
+                onCheckedChange = { viewModel.setScanOnlyWhileCharging(it) }
             )
         }
 

@@ -717,6 +717,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
                 if (pending.isEmpty()) break
                 _labelScanProgress.value = (allItems.size - pending.size) to allItems.size
+                // Big rescans only run while charging (default); small ones always run.
+                while (pending.size > 200 && _scanOnlyWhileCharging.value && !isCharging()) {
+                    kotlinx.coroutines.delay(30_000)
+                }
+                kotlinx.coroutines.delay(250) // throttle: keep the phone cool during long scans
                 pending.take(25).forEach { item ->
                     val entry = runCatching {
                         if (item.isVideo) {
@@ -986,6 +991,21 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     /** Re-locks the app (screen off). No-op state change when lock is off. */
     fun lockApp() { _appUnlocked.value = false }
+
+    private val _scanOnlyWhileCharging = MutableStateFlow(prefs.getBoolean("scanOnlyWhileCharging", true))
+    val scanOnlyWhileCharging: StateFlow<Boolean> = _scanOnlyWhileCharging
+
+    fun setScanOnlyWhileCharging(enabled: Boolean) {
+        _scanOnlyWhileCharging.value = enabled
+        prefs.edit().putBoolean("scanOnlyWhileCharging", enabled).apply()
+    }
+
+    private fun isCharging(): Boolean {
+        val intent = getApplication<android.app.Application>().registerReceiver(
+            null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        )
+        return (intent?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+    }
 
     private val _hideSensitive = MutableStateFlow(prefs.getBoolean("hideSensitive", true))
     val hideSensitive: StateFlow<Boolean> = _hideSensitive
