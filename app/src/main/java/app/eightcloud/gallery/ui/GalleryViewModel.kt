@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
@@ -28,6 +28,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     private var allItems: List<MediaItem> = emptyList()
+
+    private val _bucketFilter = MutableStateFlow<String?>(null)
+    val bucketFilter: StateFlow<String?> = _bucketFilter
+
+    private val _bucketCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val bucketCounts: StateFlow<Map<String, Int>> = _bucketCounts
+
+    fun setBucketFilter(bucket: String?) {
+        _bucketFilter.value = bucket
+        applyView()
+    }
 
     private val _items = MutableStateFlow<List<MediaItem>>(emptyList())
     val items: StateFlow<List<MediaItem>> = _items
@@ -107,6 +118,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 MediaStoreSource.query(getApplication())
             }
             allItems = result
+            _bucketCounts.value = result.groupingBy { it.bucket.ifBlank { "Other" } }.eachCount()
             applyView()
             refreshBackupStatus()
             _loading.value = false
@@ -154,6 +166,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openSettings() { _screen.value = Screen.SETTINGS }
+    fun openAlbums() { _screen.value = Screen.ALBUMS }
 
     fun openBackup() { _screen.value = Screen.BACKUP }
 
@@ -207,6 +220,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val videosOnly = _videosOnly.value
         val query = _searchQuery.value.trim()
         val statusFilter = _statusFilter.value
+        val bucketFilter = _bucketFilter.value
         val field = _sortField.value
         val ascending = _sortAscending.value
         val statusMap = _statusById.value
@@ -214,6 +228,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 var view = source
+                if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
                 if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
                 if (videosOnly) view = view.filter { it.isVideo }
                 if (query.isNotEmpty()) {

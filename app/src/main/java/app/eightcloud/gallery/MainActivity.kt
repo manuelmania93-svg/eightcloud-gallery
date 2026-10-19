@@ -32,6 +32,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Settings
+import app.eightcloud.gallery.ui.AlbumsScreen
 import app.eightcloud.gallery.ui.BackupScreen
 import app.eightcloud.gallery.ui.BackupViewModel
 import app.eightcloud.gallery.ui.EightCloudTheme
@@ -94,13 +100,71 @@ fun EightCloudApp() {
                 if (granted && !permissionGranted) viewModel.setPermissionGranted(true)
             }
             if (granted) {
-                when (screen) {
-                    Screen.GRID -> GridScreen(viewModel)
-                    Screen.VIEWER -> ViewerScreen(viewModel)
-                    Screen.SETTINGS -> SettingsScreen(viewModel)
-                    Screen.BACKUP -> {
-                        val backupViewModel: BackupViewModel = viewModel()
-                        BackupScreen(backupViewModel, onBack = { viewModel.backToGrid() })
+                androidx.compose.material3.Scaffold(
+                    bottomBar = {
+                        if (screen != Screen.VIEWER) {
+                            androidx.compose.material3.NavigationBar {
+                                androidx.compose.material3.NavigationBarItem(
+                                    selected = screen == Screen.GRID,
+                                    onClick = { viewModel.backToGrid() },
+                                    icon = {
+                                        androidx.compose.material3.Icon(
+                                            androidx.compose.material.icons.Icons.Filled.Image,
+                                            contentDescription = "Photos"
+                                        )
+                                    },
+                                    label = { Text("Photos") }
+                                )
+                                androidx.compose.material3.NavigationBarItem(
+                                    selected = screen == Screen.ALBUMS,
+                                    onClick = { viewModel.openAlbums() },
+                                    icon = {
+                                        androidx.compose.material3.Icon(
+                                            androidx.compose.material.icons.Icons.Filled.Folder,
+                                            contentDescription = "Albums"
+                                        )
+                                    },
+                                    label = { Text("Albums") }
+                                )
+                                androidx.compose.material3.NavigationBarItem(
+                                    selected = screen == Screen.BACKUP,
+                                    onClick = { viewModel.openBackup() },
+                                    icon = {
+                                        androidx.compose.material3.Icon(
+                                            androidx.compose.material.icons.Icons.Filled.Cloud,
+                                            contentDescription = "Cloud"
+                                        )
+                                    },
+                                    label = { Text("Cloud") }
+                                )
+                                androidx.compose.material3.NavigationBarItem(
+                                    selected = screen == Screen.SETTINGS,
+                                    onClick = { viewModel.openSettings() },
+                                    icon = {
+                                        androidx.compose.material3.Icon(
+                                            androidx.compose.material.icons.Icons.Filled.Settings,
+                                            contentDescription = "Settings"
+                                        )
+                                    },
+                                    label = { Text("Settings") }
+                                )
+                            }
+                        }
+                    }
+                ) { navPadding ->
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier.padding(navPadding)
+                    ) {
+                        when (screen) {
+                            Screen.GRID -> GridScreen(viewModel)
+                            Screen.VIEWER -> ViewerScreen(viewModel)
+                            Screen.ALBUMS -> AlbumsScreen(viewModel)
+                            Screen.SETTINGS -> SettingsScreen(viewModel)
+                            Screen.BACKUP -> {
+                                val backupViewModel: BackupViewModel = viewModel()
+                                BackupScreen(backupViewModel, onBack = { viewModel.backToGrid() })
+                            }
+                        }
                     }
                 }
             } else {

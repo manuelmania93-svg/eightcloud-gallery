@@ -17,6 +17,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,19 +109,26 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 private sealed class GridEntry(val key: String) {
-    class Header(val title: String) : GridEntry("header-$title")
+    class Header(val title: String, var count: Int = 0) : GridEntry("header-$title")
     class Media(val item: MediaItem) : GridEntry("media-${item.id}")
 }
 
 private fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEntry> {
-    val entries = ArrayList<GridEntry>(items.size + 12)
+    val entries = ArrayList<GridEntry>(items.size + 64)
     var lastLabel: String? = null
     val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    val dayFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")
     for (item in items) {
         val label: String? = when (field) {
-            SortField.DATE -> MediaSort.monthLabel(
-                Instant.ofEpochMilli(item.dateMillis).atZone(zone).toLocalDate()
-            )
+            SortField.DATE -> {
+                val day = Instant.ofEpochMilli(item.dateMillis).atZone(zone).toLocalDate()
+                when (day) {
+                    today -> "Today"
+                    today.minusDays(1) -> "Yesterday"
+                    else -> day.format(dayFormatter)
+                }
+            }
             SortField.NAME -> MediaSort.letterLabel(item.name)
             SortField.SIZE -> null
         }
@@ -122,6 +136,7 @@ private fun buildEntries(items: List<MediaItem>, field: SortField): List<GridEnt
             entries.add(GridEntry.Header(label))
             lastLabel = label
         }
+        if (label != null) (entries.last() as? GridEntry.Header)?.let { it.count++ }
         entries.add(GridEntry.Media(item))
     }
     return entries
@@ -152,6 +167,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
     }
     val favorites by viewModel.favorites.collectAsState()
     val statusById by viewModel.statusById.collectAsState()
+    val bucketFilter by viewModel.bucketFilter.collectAsState()
 
     androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshBackupStatus() }
     var sortMenuOpen by remember { mutableStateOf(false) }
@@ -193,66 +209,27 @@ fun GridScreen(viewModel: GalleryViewModel) {
                     }
                 )
             } else {
-            TopAppBar(
-                title = {
-                    if (searchActive) {
-                        androidx.compose.material3.OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { viewModel.setSearchQuery(it) },
-                            placeholder = { Text("Search name or date (2026-10)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        Text("8CloudGallery")
-                    }
+            val sortLabel = when (sortField) {
+                SortField.DATE -> "Date"
+                SortField.NAME -> "Name"
+                SortField.SIZE -> "Size"
+            }
+            SkyHeader(
+                sortLabel = sortLabel,
+                searchActive = searchActive,
+                searchQuery = searchQuery,
+                onSearchChange = { viewModel.setSearchQuery(it) },
+                onToggleSearch = {
+                    if (searchActive) viewModel.setSearchQuery("")
+                    searchActive = !searchActive
                 },
-                actions = {
-                    IconButton(onClick = {
-                        if (searchActive) viewModel.setSearchQuery("")
-                        searchActive = !searchActive
-                    }) {
-                        Icon(
-                            imageVector = if (searchActive) Icons.Filled.Close else Icons.Filled.Search,
-                            contentDescription = "Search"
-                        )
-                    }
-                    IconButton(onClick = { viewModel.toggleFavoritesOnly() }) {
-                        Icon(
-                            imageVector = if (favoritesOnly) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            contentDescription = "Favorites filter",
-                            tint = if (favoritesOnly) Color(0xFFE2557A) else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Box {
-                        IconButton(onClick = { sortMenuOpen = true }) {
-                            Icon(Icons.Filled.List, contentDescription = "Sort")
-                        }
-                        DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
-                            SortOption("Date (newest first)", SortField.DATE, false, sortField, sortAscending) {
-                                viewModel.setSort(SortField.DATE, false); sortMenuOpen = false
-                            }
-                            SortOption("Date (oldest first)", SortField.DATE, true, sortField, sortAscending) {
-                                viewModel.setSort(SortField.DATE, true); sortMenuOpen = false
-                            }
-                            SortOption("Size (largest first)", SortField.SIZE, false, sortField, sortAscending) {
-                                viewModel.setSort(SortField.SIZE, false); sortMenuOpen = false
-                            }
-                            SortOption("Size (smallest first)", SortField.SIZE, true, sortField, sortAscending) {
-                                viewModel.setSort(SortField.SIZE, true); sortMenuOpen = false
-                            }
-                            SortOption("Name (A-Z)", SortField.NAME, true, sortField, sortAscending) {
-                                viewModel.setSort(SortField.NAME, true); sortMenuOpen = false
-                            }
-                            SortOption("Name (Z-A)", SortField.NAME, false, sortField, sortAscending) {
-                                viewModel.setSort(SortField.NAME, false); sortMenuOpen = false
-                            }
-                        }
-                    }
-                    IconButton(onClick = { viewModel.openSettings() }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                }
+                favoritesOnly = favoritesOnly,
+                onToggleFavorites = { viewModel.toggleFavoritesOnly() },
+                sortMenuOpen = sortMenuOpen,
+                onSortMenuOpen = { sortMenuOpen = it },
+                sortField = sortField,
+                sortAscending = sortAscending,
+                onSort = { f, a -> viewModel.setSort(f, a); sortMenuOpen = false }
             )
             }
         }
@@ -262,6 +239,23 @@ fun GridScreen(viewModel: GalleryViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            if (bucketFilter != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .clickable { viewModel.setBucketFilter(null) }
+                ) {
+                    Text(
+                        text = "Album: $bucketFilter  ✕",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
             StatusFilterRow(
                 selected = statusFilter,
                 counts = sectionCounts,
@@ -329,12 +323,25 @@ fun GridScreen(viewModel: GalleryViewModel) {
                         }
                     }) { entry ->
                         when (entry) {
-                            is GridEntry.Header -> Text(
-                                text = entry.title,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                            )
+                            is GridEntry.Header -> Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = entry.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Text(
+                                    text = "${entry.count} items",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             is GridEntry.Media -> MediaThumb(
                                 item = entry.item,
                                 status = statusById[entry.item.id],
@@ -493,7 +500,7 @@ private fun MediaThumb(
     Box(
         modifier = Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
@@ -508,23 +515,23 @@ private fun MediaThumb(
         )
         Box(
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(5.dp)
-                .size(20.dp)
-                .background(Color.Black.copy(alpha = 0.35f), CircleShape),
+                .align(Alignment.TopEnd)
+                .padding(6.dp)
+                .size(26.dp)
+                .background(Color.White, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             val (badgeIcon, badgeTint, badgeDesc) = when (status) {
-                BackupEntry.BACKED_UP -> Triple(Icons.Filled.Check, Color(0xFF7BE3A8), "Backed up")
-                BackupEntry.CLOUD_ONLY -> Triple(Icons.Filled.KeyboardArrowDown, Color(0xFF9CC8EC), "Cloud only")
+                BackupEntry.BACKED_UP -> Triple(Icons.Filled.CloudDone, Color(0xFF2E86D4), "Backed up")
+                BackupEntry.CLOUD_ONLY -> Triple(Icons.Filled.CloudDownload, Color(0xFF41719E), "Cloud only")
                 BackupEntry.MISSING_IN_CLOUD -> Triple(Icons.Filled.Warning, Color(0xFFE2A455), "Missing in cloud")
-                else -> Triple(Icons.Filled.Phone, Color.White, "Local only")
+                else -> Triple(Icons.Filled.Phone, Color(0xFF8AA0B4), "Local only")
             }
             Icon(
                 imageVector = badgeIcon,
                 contentDescription = badgeDesc,
                 tint = badgeTint,
-                modifier = Modifier.size(12.dp)
+                modifier = Modifier.size(15.dp)
             )
         }
         if (isSelected) {
@@ -549,8 +556,8 @@ private fun MediaThumb(
                 contentDescription = "Favorite",
                 tint = Color(0xFFE2557A),
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(5.dp)
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
                     .size(18.dp)
             )
         }
@@ -576,6 +583,169 @@ private fun MediaThumb(
                         color = Color.White,
                         style = MaterialTheme.typography.labelSmall
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CloudPuff(modifier: Modifier = Modifier, alpha: Float = 0.85f) {
+    val c = Color.White.copy(alpha = alpha)
+    Row(modifier = modifier, verticalAlignment = Alignment.Bottom) {
+        Box(modifier = Modifier.size(22.dp).background(c, CircleShape))
+        Box(modifier = Modifier.size(34.dp).offset(y = (-10).dp).background(c, CircleShape))
+        Box(modifier = Modifier.size(22.dp).background(c, CircleShape))
+    }
+}
+
+@Composable
+private fun SkyHeader(
+    sortLabel: String,
+    searchActive: Boolean,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    onToggleSearch: () -> Unit,
+    favoritesOnly: Boolean,
+    onToggleFavorites: () -> Unit,
+    sortMenuOpen: Boolean,
+    onSortMenuOpen: (Boolean) -> Unit,
+    sortField: SortField,
+    sortAscending: Boolean,
+    onSort: (SortField, Boolean) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF5FA9E8), Color(0xFF9CCDF3), Color(0xFFEDF7FF))
+                )
+            )
+            .statusBarsPadding()
+            .padding(bottom = 10.dp)
+    ) {
+        CloudPuff(
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 12.dp),
+            alpha = 0.55f
+        )
+        CloudPuff(
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = 120.dp, top = 2.dp),
+            alpha = 0.35f
+        )
+        if (searchActive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchChange,
+                    placeholder = { Text("Search name or date (2026-10)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color.White
+                    )
+                )
+                IconButton(onClick = onToggleSearch) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close search", tint = Color(0xFF0A3A66))
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Filled.Cloud,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(52.dp)
+                    )
+                    Text(
+                        text = "8",
+                        color = Color(0xFF2E86D4),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    text = "8CloudGallery",
+                    color = Color(0xFF0A3A66),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onToggleSearch) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search", tint = Color(0xFF0A3A66))
+                }
+                IconButton(onClick = onToggleFavorites) {
+                    Icon(
+                        imageVector = if (favoritesOnly) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = "Favorites filter",
+                        tint = if (favoritesOnly) Color(0xFFE2557A) else Color(0xFF0A3A66)
+                    )
+                }
+                Box {
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(50),
+                        shadowElevation = 2.dp,
+                        modifier = Modifier.clickable { onSortMenuOpen(true) }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.SwapVert,
+                                contentDescription = null,
+                                tint = Color(0xFF2E86D4),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Sort: $sortLabel",
+                                color = Color(0xFF0A3A66),
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                contentDescription = "Sort options",
+                                tint = Color(0xFF0A3A66),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { onSortMenuOpen(false) }) {
+                        SortOption("Date (newest first)", SortField.DATE, false, sortField, sortAscending) {
+                            onSort(SortField.DATE, false)
+                        }
+                        SortOption("Date (oldest first)", SortField.DATE, true, sortField, sortAscending) {
+                            onSort(SortField.DATE, true)
+                        }
+                        SortOption("Size (largest first)", SortField.SIZE, false, sortField, sortAscending) {
+                            onSort(SortField.SIZE, false)
+                        }
+                        SortOption("Size (smallest first)", SortField.SIZE, true, sortField, sortAscending) {
+                            onSort(SortField.SIZE, true)
+                        }
+                        SortOption("Name (A-Z)", SortField.NAME, true, sortField, sortAscending) {
+                            onSort(SortField.NAME, true)
+                        }
+                        SortOption("Name (Z-A)", SortField.NAME, false, sortField, sortAscending) {
+                            onSort(SortField.NAME, false)
+                        }
+                    }
                 }
             }
         }
