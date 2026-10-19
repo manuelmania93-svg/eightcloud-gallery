@@ -44,6 +44,14 @@ class MainActivitySmokeTest {
         .outerRule(GrantPermissionRule.grant(*mediaPermissions))
         .around(composeRule)
 
+    @org.junit.Before
+    fun clearPrefs() {
+        // Filters and grid position now persist; isolate each test.
+        InstrumentationRegistry.getInstrumentation().targetContext
+            .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            .edit().clear().commit()
+    }
+
     @Test
     fun appStarts_showsTitleAndGrid() {
         composeRule.onNodeWithText("8CloudGallery").assertIsDisplayed()
