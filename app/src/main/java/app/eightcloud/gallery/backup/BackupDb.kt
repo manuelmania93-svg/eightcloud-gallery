@@ -31,7 +31,8 @@ data class BackupEntry(
     val lastSeenAt: Long,
     val errorMessage: String = "",
     val partChecksums: String = "", // comma-separated SHA-256 hex, one per part
-    val uploadedPartIds: String = "" // comma-separated telegram message ids, positional per part; blank = not yet uploaded
+    val uploadedPartIds: String = "", // comma-separated telegram message ids, positional per part; blank = not yet uploaded
+    val keyTag: String = "ks" // which key encrypts this entry: 'ks' device keystore, 'pp' passphrase DEK
 ) {
     companion object {
         const val PENDING = "PENDING"
@@ -81,8 +82,8 @@ interface BackupDao {
     @Query("UPDATE backup_index SET status = 'FAILED', errorMessage = :message WHERE contentHash = :hash")
     suspend fun markFailed(hash: String, message: String)
 
-    @Query("UPDATE backup_index SET status = :status, telegramMessageIds = :messageIds, chunkIvs = :ivs, partChecksums = :checksums, uploadedAt = :uploadedAt WHERE contentHash = :hash")
-    suspend fun markUploadedWithChecksums(hash: String, status: String, messageIds: String, ivs: String, checksums: String, uploadedAt: Long)
+    @Query("UPDATE backup_index SET status = :status, telegramMessageIds = :messageIds, chunkIvs = :ivs, partChecksums = :checksums, uploadedAt = :uploadedAt, keyTag = :keyTag WHERE contentHash = :hash")
+    suspend fun markUploadedWithChecksums(hash: String, status: String, messageIds: String, ivs: String, checksums: String, uploadedAt: Long, keyTag: String)
 
     @Query("UPDATE backup_index SET status = 'PENDING', errorMessage = '' WHERE status = 'FAILED'")
     suspend fun resetFailed(): Int
@@ -176,7 +177,7 @@ interface GeoDao {
     suspend fun locatedCount(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class], version = 7, exportSchema = false)
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class], version = 8, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
@@ -220,6 +221,12 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE backup_index ADD COLUMN keyTag TEXT NOT NULL DEFAULT 'ks'")
+            }
+        }
+
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE backup_index ADD COLUMN uploadedPartIds TEXT NOT NULL DEFAULT ''")
@@ -245,7 +252,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build().also { instance = it }
         }
     }
 }

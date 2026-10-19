@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.util.Base64
 import app.eightcloud.gallery.crypto.BackupCrypto
+import app.eightcloud.gallery.crypto.BackupKeys
 import app.eightcloud.gallery.crypto.KeystoreKeys
 import app.eightcloud.gallery.data.Hasher
 import app.eightcloud.gallery.data.MediaItem
@@ -280,7 +281,7 @@ class BackupEngine(private val context: Context) {
             throw TdException(0, "over Telegram's 2 GB limit and splitting is off in Settings")
         }
         val uri = uriFor(entry)
-        val key = KeystoreKeys.backupKey()
+        val (key, keyTag) = BackupKeys.uploadKey(context)
         // Resume support: reuse the stored IV on a retry so the re-encryption
         // produces the identical ciphertext and uploaded parts can be skipped.
         val storedIv = entry.chunkIvs.split(',').firstOrNull()?.trim().orEmpty()
@@ -305,7 +306,7 @@ class BackupEngine(private val context: Context) {
                     entry.contentHash, iv64, sink.checksums.joinToString(",")
                 )
             }
-            uploadParts(chatId, partFiles, sink.checksums, entry, iv64, threadId, onPartProgress)
+            uploadParts(chatId, partFiles, sink.checksums, entry, iv64, threadId, keyTag, onPartProgress)
         } finally {
             partFiles.forEach { it.delete() }
         }
@@ -318,6 +319,7 @@ class BackupEngine(private val context: Context) {
         entry: BackupEntry,
         iv64: String,
         threadId: Long? = null,
+        keyTag: String = BackupKeys.TAG_KEYSTORE,
         onPartProgress: (uploadedInFile: Long, fileBytes: Long) -> Unit = { _, _ -> }
     ) {
         val captionBase = entry.contentHash.take(12) + " " + entry.name
@@ -348,7 +350,8 @@ class BackupEngine(private val context: Context) {
             partIds.joinToString(","),
             iv64,
             checksums.joinToString(","),
-            System.currentTimeMillis()
+            System.currentTimeMillis(),
+            keyTag
         )
     }
 
@@ -409,6 +412,60 @@ class BackupEngine(private val context: Context) {
         }
     }
 
+    /**
+     * Uploads the passphrase keyslot (salt + iterations + wrapped DEK) as a
+     * small document in the destination. Contains nothing decryptable without
+     * the passphrase. Called after the passphrase is set/changed.
+     */
+    suspend fun uploadKeyslot() = withContext(Dispatchers.IO) {
+        val json = BackupKeys.keyslotJson(context) ?: return@withContext
+        val tmp = File(chunkDir, "8cloudgallery-keyslot.json")
+        try {
+            tmp.writeText(json)
+            val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            val destChat = prefs.getLong("destChatId", 0L).takeIf { it != 0L } ?: td.savedMessagesChatId()
+            val general = prefs.getLong("topicGeneral", 0L).takeIf { it != 0L && prefs.getLong("destChatId", 0L) != 0L }
+            td.uploadDocument(destChat, tmp.absolutePath, "8cloudgallery-keyslot", general)
+        } finally {
+            tmp.delete()
+        }
+        app.eightcloud.gallery.AppLog.log("backup", "keyslot uploaded")
+    }
+
+    /**
+     * Fresh-install recovery: finds the keyslot document in the destination,
+     * stores it locally, then [passphrase] unlocks the DEK. Returns false on
+     * a missing keyslot or wrong passphrase.
+     */
+    suspend fun unlockFromCloud(passphrase: CharArray): Boolean = withContext(Dispatchers.IO) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val chatId = destinationChat()
+        val generalTopic = prefs.getLong("topicGeneral", 0L).takeIf {
+            it != 0L && prefs.getLong("destChatId", 0L) != 0L
+        }?.toInt()
+        var fromId = 0L
+        var slotDoc: TdApi.Document? = null
+        var rounds = 0
+        while (slotDoc == null && rounds < 20) {
+            val page = if (generalTopic != null) td.forumTopicHistory(chatId, generalTopic, fromId, 100)
+            else td.chatHistory(chatId, fromId, 100)
+            if (page.messages.isEmpty()) break
+            for (message in page.messages) {
+                val content = message.content
+                if (content is TdApi.MessageDocument && content.document.fileName == "8cloudgallery-keyslot.json") {
+                    slotDoc = content.document
+                    break
+                }
+            }
+            fromId = page.messages.last().id
+            rounds++
+        }
+        val doc = slotDoc ?: return@withContext false
+        val path = td.downloadFile(doc.document.id)
+        BackupKeys.applyKeyslot(context, File(path).readText())
+        BackupKeys.unlockWithPassphrase(context, passphrase)
+    }
+
     /** Exports the whole index, encrypted, as the latest index document in Saved Messages. */
     suspend fun exportIndex() = withContext(Dispatchers.IO) {
         val entries = db.dao().all()
@@ -424,6 +481,7 @@ class BackupEngine(private val context: Context) {
                 put("messageIds", e.telegramMessageIds)
                 put("ivs", e.chunkIvs)
                 put("partChecksums", e.partChecksums)
+                put("keyTag", e.keyTag)
                 put("uploadedAt", e.uploadedAt)
             })
         }
@@ -432,7 +490,7 @@ class BackupEngine(private val context: Context) {
             put("exportedAt", System.currentTimeMillis())
             put("entries", array)
         }
-        val encryptedBytes = BackupCrypto.encrypt(KeystoreKeys.backupKey(), payload.toString().toByteArray(Charsets.UTF_8))
+        val encryptedBytes = BackupCrypto.encrypt(BackupKeys.uploadKey(context).first, payload.toString().toByteArray(Charsets.UTF_8))
         val tmp = File(chunkDir, "8cloudgallery-index.enc")
         try {
             tmp.writeBytes(encryptedBytes)
@@ -472,6 +530,7 @@ class BackupEngine(private val context: Context) {
                 put("ivs", e.chunkIvs)
                 put("partChecksums", e.partChecksums)
                 put("partIds", e.uploadedPartIds)
+                put("keyTag", e.keyTag)
                 put("uploadedAt", e.uploadedAt)
             })
         }
@@ -547,7 +606,8 @@ class BackupEngine(private val context: Context) {
                     partChecksums = o.optString("partChecksums", ""),
                     uploadedPartIds = o.optString("partIds", ""),
                     uploadedAt = o.optLong("uploadedAt", 0L),
-                    lastSeenAt = now
+                    lastSeenAt = now,
+                    keyTag = o.optString("keyTag", BackupKeys.TAG_PASSPHRASE)
                 )
             )
             imported++
@@ -583,8 +643,19 @@ class BackupEngine(private val context: Context) {
         }
         val doc = indexDoc ?: return@withContext 0
         val path = td.downloadFile(doc.document.id)
-        val plain = BackupCrypto.decrypt(KeystoreKeys.backupKey(), File(path).readBytes())
-        val root = JSONObject(String(plain, Charsets.UTF_8))
+        val payloadBytes = File(path).readBytes()
+        // The index may be encrypted with either the passphrase DEK ('pp') or
+        // the legacy keystore key ('ks') - try the active one, then the other.
+        val keys = mutableListOf(BackupKeys.uploadKey(context).first)
+        if (BackupKeys.passphraseEnabled(context)) keys.add(KeystoreKeys.backupKey())
+        var lastError: Exception? = null
+        var plain: ByteArray? = null
+        for (k in keys) {
+            try { plain = BackupCrypto.decrypt(k, payloadBytes); break }
+            catch (e: Exception) { lastError = e }
+        }
+        val indexPlain = plain ?: throw lastError ?: TdException(0, "cannot decrypt index - unlock with your passphrase first")
+        val root = JSONObject(String(indexPlain, Charsets.UTF_8))
         val array = root.getJSONArray("entries")
         var imported = 0
         val now = System.currentTimeMillis()
@@ -604,7 +675,8 @@ class BackupEngine(private val context: Context) {
                     chunkIvs = o.getString("ivs"),
                     partChecksums = o.optString("partChecksums", ""),
                     uploadedAt = o.getLong("uploadedAt"),
-                    lastSeenAt = now
+                    lastSeenAt = now,
+                    keyTag = o.optString("keyTag", BackupKeys.TAG_PASSPHRASE)
                 )
             )
             imported++
@@ -761,14 +833,13 @@ class BackupEngine(private val context: Context) {
         onProgress: (done: Int, total: Int, name: String) -> Unit = { _, _, _ -> }
     ): RestoreResult = withContext(Dispatchers.IO) {
         val chatId = destinationChat()
-        val key = KeystoreKeys.backupKey()
         val targets = db.dao().all().filter { it.contentHash in hashes }
         var restored = 0
         var failed = 0
         targets.forEachIndexed { index, entry ->
             onProgress(index, targets.size, entry.name)
             try {
-                restoreOne(entry, chatId, key)
+                restoreOne(entry, chatId, BackupKeys.keyForTag(context, entry.keyTag))
                 restored++
             } catch (e: Exception) {
                 failed++
@@ -858,7 +929,7 @@ class BackupEngine(private val context: Context) {
      */
     suspend fun decryptToCache(entry: BackupEntry): File = withContext(Dispatchers.IO) {
         val chatId = destinationChat()
-        val key = KeystoreKeys.backupKey()
+        val key = BackupKeys.keyForTag(context, entry.keyTag)
         val msgIds = entry.telegramMessageIds.split(',')
             .mapNotNull { it.trim().toLongOrNull() }
             .sorted()

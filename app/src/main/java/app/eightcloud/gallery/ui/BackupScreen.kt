@@ -72,6 +72,9 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var showFreeUpDialog by remember { mutableStateOf(false) }
+    var showSetPassDialog by remember { mutableStateOf(false) }
+    var showUnlockPassDialog by remember { mutableStateOf(false) }
+    val passphraseEnabled by viewModel.passphraseEnabled.collectAsState()
     val freeUpLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) {
@@ -226,6 +229,85 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { showFreeUpDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (showSetPassDialog) {
+        var pass1 by remember { mutableStateOf("") }
+        var pass2 by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showSetPassDialog = false },
+            title = { Text("Set backup passphrase") },
+            text = {
+                Column {
+                    Text(
+                        "Only for a NEW backup. If you already have a cloud backup from another install, cancel and use \"Unlock with passphrase\" instead.\n\nIf you forget this passphrase, your cloud backup CANNOT be restored. It is never uploaded or stored.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = pass1,
+                        onValueChange = { pass1 = it },
+                        label = { Text("Passphrase (min. 8 characters)") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    OutlinedTextField(
+                        value = pass2,
+                        onValueChange = { pass2 = it },
+                        label = { Text("Repeat passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        isError = pass2.isNotEmpty() && pass1 != pass2,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSetPassDialog = false
+                        viewModel.setBackupPassphrase(pass1)
+                    },
+                    enabled = pass1.length >= 8 && pass1 == pass2
+                ) { Text("Set") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSetPassDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (showUnlockPassDialog) {
+        var pass by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showUnlockPassDialog = false },
+            title = { Text(if (passphraseEnabled) "Verify passphrase" else "Unlock with passphrase") },
+            text = {
+                Column {
+                    if (!passphraseEnabled) {
+                        Text(
+                            "Enter the passphrase of your existing cloud backup. The app fetches the key slot from your destination and unlocks the backup key.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    OutlinedTextField(
+                        value = pass,
+                        onValueChange = { pass = it },
+                        label = { Text("Passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showUnlockPassDialog = false
+                        viewModel.unlockOrVerifyPassphrase(pass)
+                    },
+                    enabled = pass.isNotEmpty()
+                ) { Text(if (passphraseEnabled) "Verify" else "Unlock") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnlockPassDialog = false }) { Text("Cancel") }
             }
         )
     }
@@ -478,6 +560,28 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                             .fillMaxWidth()
                             .padding(top = 8.dp)
                     ) { Text("Import settings + index from file") }
+                    Text(
+                        if (passphraseEnabled) "Backup passphrase: set (survives reinstall)"
+                        else "Backup passphrase: not set - cloud backup dies with this install",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (passphraseEnabled) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    if (!passphraseEnabled) {
+                        OutlinedButton(
+                            onClick = { showSetPassDialog = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                        ) { Text("Set passphrase (new backup)") }
+                    }
+                    OutlinedButton(
+                        onClick = { showUnlockPassDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                    ) { Text(if (passphraseEnabled) "Verify passphrase" else "Unlock with passphrase") }
                 }
                 is TdApi.AuthorizationStateWaitPhoneNumber, null -> {
                     if (viewModel.credentialsMissing) {

@@ -10,6 +10,7 @@ import app.eightcloud.gallery.backup.BackupEngine
 import app.eightcloud.gallery.backup.BackupWorker
 import app.eightcloud.gallery.backup.BackupEntry
 import app.eightcloud.gallery.backup.BackupControl
+import app.eightcloud.gallery.crypto.BackupKeys
 import app.eightcloud.gallery.backup.BackupProgress
 import app.eightcloud.gallery.data.MediaStoreSource
 import app.eightcloud.gallery.telegram.TdClient
@@ -279,6 +280,42 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         _error.value = if (imported == 0) "No cloud backups found to rebuild from"
         else "Rebuilt $imported cloud entries - they won't upload again"
         refreshCounts()
+    }
+
+    private val _passphraseEnabled = MutableStateFlow(BackupKeys.passphraseEnabled(application))
+    val passphraseEnabled: StateFlow<Boolean> = _passphraseEnabled
+
+    /** Sets a NEW passphrase (new backup). Uploads the keyslot to the cloud. */
+    fun setBackupPassphrase(passphrase: String) = guard {
+        val chars = passphrase.toCharArray()
+        try {
+            BackupKeys.setPassphrase(getApplication(), chars)
+        } finally {
+            chars.fill('\u0000')
+        }
+        engine.uploadKeyslot()
+        _passphraseEnabled.value = true
+        _error.value = "Passphrase set - this backup can now be restored after a reinstall"
+    }
+
+    /**
+     * Verifies the passphrase against the local keyslot, or - on a fresh
+     * install - fetches the keyslot from the cloud and unlocks with it.
+     */
+    fun unlockOrVerifyPassphrase(passphrase: String) = guard {
+        val chars = passphrase.toCharArray()
+        val ok = try {
+            if (BackupKeys.passphraseEnabled(getApplication())) {
+                BackupKeys.unlockWithPassphrase(getApplication(), chars)
+            } else {
+                engine.unlockFromCloud(chars)
+            }
+        } finally {
+            chars.fill('\u0000')
+        }
+        _passphraseEnabled.value = BackupKeys.passphraseEnabled(getApplication())
+        _error.value = if (ok) "Passphrase correct - backup key unlocked"
+        else "Wrong passphrase or no keyslot found in the cloud"
     }
 
     fun exportToFile(uri: android.net.Uri) = guard {
