@@ -673,14 +673,6 @@ private fun androidx.compose.foundation.layout.BoxScope.FastScrollBar(
                 }
         )
 
-        if (thumbnailFailed && !fastScrolling) {
-            Text(
-                "Preview unavailable",
-                modifier = Modifier.align(Alignment.Center).padding(12.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -805,6 +797,14 @@ private fun MediaThumb(
                 onError = { thumbnailFailed = true },
                 onSuccess = { thumbnailFailed = false },
                 modifier = Modifier.fillMaxSize()
+            )
+        }
+        if (thumbnailFailed && !fastScrolling) {
+            Text(
+                "Preview unavailable",
+                modifier = Modifier.align(Alignment.Center).padding(12.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Box(
