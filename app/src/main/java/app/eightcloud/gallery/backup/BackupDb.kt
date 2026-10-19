@@ -108,10 +108,42 @@ interface SecureDao {
     suspend fun count(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class], version = 4, exportSchema = false)
+/** On-device analysis results per media item (v0.7.0 categorization). */
+@Entity(tableName = "media_labels")
+data class MediaLabelEntry(
+    @PrimaryKey val mediaStoreId: Long,
+    val faceCount: Int,
+    val labels: String, // comma-separated ML Kit labels
+    val nsfwScore: Float, // -1 when not computed
+    val scannedAt: Long
+)
+
+@Dao
+interface MediaLabelDao {
+    @Query("SELECT * FROM media_labels")
+    suspend fun all(): List<MediaLabelEntry>
+
+    @Query("SELECT * FROM media_labels WHERE mediaStoreId = :id")
+    suspend fun byId(id: Long): MediaLabelEntry?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entry: MediaLabelEntry)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entries: List<MediaLabelEntry>)
+
+    @Query("SELECT COUNT(*) FROM media_labels")
+    suspend fun count(): Int
+
+    @Query("DELETE FROM media_labels WHERE mediaStoreId = :id")
+    suspend fun delete(id: Long)
+}
+
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class], version = 5, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
+    abstract fun mediaLabelDao(): MediaLabelDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -122,6 +154,19 @@ abstract class BackupDb : RoomDatabase() {
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE backup_index ADD COLUMN partChecksums TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS media_labels (" +
+                        "mediaStoreId INTEGER NOT NULL PRIMARY KEY, " +
+                        "faceCount INTEGER NOT NULL, " +
+                        "labels TEXT NOT NULL, " +
+                        "nsfwScore REAL NOT NULL, " +
+                        "scannedAt INTEGER NOT NULL)"
+                )
             }
         }
 
@@ -144,7 +189,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
         }
     }
 }
