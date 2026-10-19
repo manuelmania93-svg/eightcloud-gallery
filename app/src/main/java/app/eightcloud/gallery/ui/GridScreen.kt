@@ -185,6 +185,33 @@ fun GridScreen(viewModel: GalleryViewModel) {
 
     val entries by viewModel.entries.collectAsState()
     val gridState = rememberLazyGridState()
+
+    // Restore the last grid position (anchored by item id) once entries are
+    // available - after process death, app restart, or returning from the viewer.
+    var anchorApplied = remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(entries.size) {
+        if (!anchorApplied.value && entries.isNotEmpty()) {
+            anchorApplied.value = true
+            val anchorId = viewModel.gridAnchorId
+            if (anchorId != null) {
+                val target = entries.indexOfFirst { it is GridEntry.Media && it.item.id == anchorId }
+                if (target >= 0) gridState.scrollToItem(target, viewModel.gridAnchorOffset)
+            }
+        }
+    }
+    // Track the visible position so it can be restored later. Throttled so
+    // scrolling does not write to prefs on every frame.
+    androidx.compose.runtime.LaunchedEffect(gridState, entries) {
+        androidx.compose.runtime.snapshotFlow {
+            gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+        }.collect { pos ->
+            kotlinx.coroutines.delay(250)
+            val entry = entries.getOrNull(pos.first)
+            val id = (entry as? GridEntry.Media)?.item?.id
+            viewModel.saveGridAnchor(id, pos.second)
+        }
+    }
+
     androidx.compose.runtime.LaunchedEffect(jumpToEntryIndex.value) {
         jumpToEntryIndex.value?.let { target ->
             jumpToEntryIndex.value = null

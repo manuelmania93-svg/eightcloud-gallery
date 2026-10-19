@@ -56,7 +56,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private var allItems: List<MediaItem> = emptyList()
 
-    private val _bucketFilter = MutableStateFlow<String?>(null)
+    private val _bucketFilter = MutableStateFlow<String?>(prefs.getString("bucketFilter", null))
     val bucketFilter: StateFlow<String?> = _bucketFilter
 
     private val _bucketCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
@@ -65,16 +65,18 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun setBucketFilter(bucket: String?) {
         _bucketFilter.value = bucket
         if (bucket != null) _smartFilter.value = null
+        prefs.edit().putString("bucketFilter", bucket).putString("smartFilter", _smartFilter.value).apply()
         applyView()
     }
 
     // Smart albums (screenshots/videos/camera/memes) and by-month albums.
-    private val _smartFilter = MutableStateFlow<String?>(null)
+    private val _smartFilter = MutableStateFlow<String?>(prefs.getString("smartFilter", null))
     val smartFilter: StateFlow<String?> = _smartFilter
 
     fun setSmartFilter(key: String?) {
         _smartFilter.value = key
         if (key != null) _bucketFilter.value = null
+        prefs.edit().putString("smartFilter", key).putString("bucketFilter", _bucketFilter.value).apply()
         applyView()
     }
 
@@ -251,13 +253,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
 
-    private val _videosOnly = MutableStateFlow(false)
+    private val _videosOnly = MutableStateFlow(prefs.getBoolean("videosOnly", false))
     val videosOnly: StateFlow<Boolean> = _videosOnly
 
-    private val _statusFilter = MutableStateFlow(StatusFilter.ALL)
+    private val _statusFilter = MutableStateFlow(
+        runCatching { StatusFilter.valueOf(prefs.getString("statusFilter", "ALL")!!) }.getOrDefault(StatusFilter.ALL)
+    )
     val statusFilter: StateFlow<StatusFilter> = _statusFilter
 
-    private val _favoritesOnly = MutableStateFlow(false)
+    private val _favoritesOnly = MutableStateFlow(prefs.getBoolean("favoritesOnly", false))
     val favoritesOnly: StateFlow<Boolean> = _favoritesOnly
 
     private val _favorites = MutableStateFlow(loadFavorites())
@@ -348,6 +352,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleFavoritesOnly() {
         _favoritesOnly.value = !_favoritesOnly.value
+        prefs.edit().putBoolean("favoritesOnly", _favoritesOnly.value).apply()
         applyView()
     }
 
@@ -397,6 +402,21 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         _slideshowMusicUri.value = uri
         if (uri == null) prefs.edit().remove("slideshowMusic").apply()
         else prefs.edit().putString("slideshowMusic", uri).apply()
+    }
+
+    // Last visible grid position, anchored by item id so it survives list changes.
+    var gridAnchorId: Long? = prefs.getLong("gridAnchorId", -1L).takeIf { it != -1L }
+        private set
+    var gridAnchorOffset: Int = prefs.getInt("gridAnchorOffset", 0)
+        private set
+
+    fun saveGridAnchor(id: Long?, offset: Int) {
+        gridAnchorId = id
+        gridAnchorOffset = offset
+        prefs.edit()
+            .putLong("gridAnchorId", id ?: -1L)
+            .putInt("gridAnchorOffset", offset)
+            .apply()
     }
 
     private val _slideshowVideoMode = MutableStateFlow(prefs.getString("slideshowVideos", "PLAY")!!)
@@ -619,11 +639,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleVideosOnly() {
         _videosOnly.value = !_videosOnly.value
+        prefs.edit().putBoolean("videosOnly", _videosOnly.value).apply()
         applyView()
     }
 
     fun setStatusFilter(filter: StatusFilter) {
         _statusFilter.value = filter
+        prefs.edit().putString("statusFilter", filter.name).apply()
         applyView()
     }
 

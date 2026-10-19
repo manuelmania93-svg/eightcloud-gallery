@@ -172,6 +172,43 @@ class MainActivitySmokeTest {
     }
 
     @Test
+    fun viewerCloseRestoresGridPosition() {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val now = System.currentTimeMillis()
+        val uris = (0 until 40).map { i ->
+            insertTestImage("Anchor%02d.png".format(i), now - i * 60_000L)
+        }
+        try {
+            composeRule.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[GalleryViewModel::class.java].loadMedia()
+            }
+            composeRule.waitUntil(timeoutMillis = 15000) {
+                composeRule.onAllNodesWithContentDescription("Anchor00.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            // Scroll far down and open an item that is off the first screen.
+            composeRule.onNodeWithTag("mediaGrid").performScrollToIndex(30)
+            composeRule.waitForIdle()
+            composeRule.onNodeWithContentDescription("Anchor30.png").performClick()
+            composeRule.waitUntil(timeoutMillis = 5000) {
+                composeRule.onAllNodesWithText("Anchor30.png").fetchSemanticsNodes().isNotEmpty()
+            }
+            // Close the viewer; the grid must come back at the same item,
+            // not scrolled to the top.
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                composeRule.activity.onBackPressedDispatcher.onBackPressed()
+            }
+            composeRule.waitUntil(timeoutMillis = 5000) {
+                composeRule.onAllNodesWithContentDescription("Anchor30.png")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("Anchor30.png").assertIsDisplayed()
+        } finally {
+            uris.forEach { resolver.delete(it, null, null) }
+        }
+    }
+
+    @Test
     fun viewerOpensVideoItemWithoutCrashing() {
         val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
         val values = ContentValues().apply {
