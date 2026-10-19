@@ -20,8 +20,8 @@ object MediaStoreSource {
             MediaStore.Files.FileColumns.DURATION,
             MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
             MediaStore.Files.FileColumns.MIME_TYPE,
-            MediaStore.Files.FileColumns.LATITUDE,
-            MediaStore.Files.FileColumns.LONGITUDE
+            MediaStore.Images.ImageColumns.LATITUDE,
+            MediaStore.Images.ImageColumns.LONGITUDE
         )
         val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
         val args = arrayOf(
@@ -44,8 +44,8 @@ object MediaStoreSource {
             val cDuration = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
             val cBucket = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME)
             val cMime = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
-            val cLat = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.LATITUDE)
-            val cLon = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.LONGITUDE)
+            val cLat = cursor.getColumnIndexOrThrow(MediaStore.Images.ImageColumns.LATITUDE)
+            val cLon = cursor.getColumnIndexOrThrow(MediaStore.Images.ImageColumns.LONGITUDE)
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(cId)
                 val isVideo = cursor.getInt(cType) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
