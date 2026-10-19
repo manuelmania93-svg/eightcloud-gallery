@@ -1,6 +1,7 @@
 package app.eightcloud.gallery.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -56,6 +57,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.activity.compose.rememberLauncherForActivityResult
 import android.net.Uri
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -337,6 +339,57 @@ private fun InfoPanel(viewModel: GalleryViewModel, item: MediaItem, modifier: Mo
     val details by produceState<MediaDetails?>(initialValue = null, item.id) {
         value = viewModel.loadDetails(item)
     }
+    var showRename by remember(item.id) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val writeConsent = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            android.widget.Toast.makeText(context, "Tap rename again to finish", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    if (showRename) {
+        var newName by remember { mutableStateOf(item.name) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRename = false },
+            title = { Text("Rename") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    enabled = newName.isNotBlank() && newName != item.name,
+                    onClick = {
+                        showRename = false
+                        viewModel.renameItem(
+                            item, newName.trim(),
+                            onNeedConsent = { sender ->
+                                runCatching {
+                                    writeConsent.launch(
+                                        androidx.activity.result.IntentSenderRequest.Builder(sender).build()
+                                    )
+                                }
+                            },
+                            onDone = { ok, err ->
+                                android.widget.Toast.makeText(
+                                    context,
+                                    if (ok) "Renamed" else (err ?: "Rename failed"),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        )
+                    }
+                ) { Text("Rename") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showRename = false }) { Text("Cancel") }
+            }
+        )
+    }
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = Color(0xE610181F),
@@ -353,7 +406,29 @@ private fun InfoPanel(viewModel: GalleryViewModel, item: MediaItem, modifier: Mo
                     .verticalScroll(rememberScrollState())
                     .padding(16.dp)
             ) {
-                infoRow("File name", d.name)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { showRename = true }
+                ) {
+                    Text(
+                        text = "File name",
+                        color = Color(0xFFB9CCDC),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.width(120.dp)
+                    )
+                    Text(
+                        text = d.name,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "Rename",
+                        tint = Color(0xFFB9CCDC),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
                 infoRow("Date", d.dateText)
                 infoRow("Size", d.sizeText)
                 infoRow("Resolution", d.resolution)

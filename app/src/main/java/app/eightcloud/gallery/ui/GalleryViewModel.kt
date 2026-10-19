@@ -394,6 +394,55 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun openMap() { _screen.value = Screen.MAP }
 
+    /**
+     * Rename the real file through MediaStore and update the cloud index
+     * in place (the content hash does not change, so nothing re-uploads).
+     * On Android 11+ the system may show a write-consent dialog first.
+     * onDone(success, errorMessage).
+     */
+    fun renameItem(
+        item: MediaItem,
+        newDisplayName: String,
+        onNeedConsent: (android.content.IntentSender) -> Unit,
+        onDone: (Boolean, String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME, newDisplayName)
+                    }
+                    val rows = getApplication<android.app.Application>().contentResolver
+                        .update(android.net.Uri.parse(item.uri), values, null, null)
+                    if (rows <= 0) throw IllegalStateException("MediaStore refused the rename")
+                }.recoverCatching { e ->
+                    val rse = e as? android.app.RecoverableSecurityException
+                        ?: throw e
+                    withContext(Dispatchers.Main) {
+                        onNeedConsent(rse.userAction.actionIntent.intentSender)
+                    }
+                    throw RenamingNeedsConsent()
+                }
+            }
+            result.onSuccess {
+                allItems = allItems.map { if (it.id == item.id) it.copy(name = newDisplayName) else it }
+                // Keep the backup index in sync without re-uploading.
+                runCatching {
+                    val db = BackupDb.get(getApplication()).dao()
+                    db.byMediaStoreId(item.id)?.let { entry ->
+                        db.upsert(entry.copy(name = newDisplayName))
+                    }
+                }
+                applyView()
+                onDone(true, null)
+            }.onFailure { e ->
+                if (e !is RenamingNeedsConsent) onDone(false, e.message ?: "Rename failed")
+            }
+        }
+    }
+
+    private class RenamingNeedsConsent : Exception()
+
     fun openViewer(index: Int) {
         _viewerStartIndex.value = index.coerceAtLeast(0)
         _screen.value = Screen.VIEWER
