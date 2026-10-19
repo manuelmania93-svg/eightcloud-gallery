@@ -80,6 +80,12 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> uri?.let { viewModel.exportToFile(it) } }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.importFromFile(it) } }
     fun backUpWithPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
@@ -456,6 +462,22 @@ fun BackupScreen(viewModel: BackupViewModel, onBack: () -> Unit) {
                             .fillMaxWidth()
                             .padding(top = 8.dp)
                     ) { Text("Find files already in the cloud") }
+                    OutlinedButton(
+                        onClick = {
+                            val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                                .format(java.util.Date())
+                            exportLauncher.launch("8cloudgallery-backup-$day.json")
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                    ) { Text("Export settings + index to file") }
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("application/json")) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                    ) { Text("Import settings + index from file") }
                 }
                 is TdApi.AuthorizationStateWaitPhoneNumber, null -> {
                     if (viewModel.credentialsMissing) {

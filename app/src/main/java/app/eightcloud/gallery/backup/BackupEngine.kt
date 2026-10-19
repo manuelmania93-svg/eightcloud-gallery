@@ -445,6 +445,117 @@ class BackupEngine(private val context: Context) {
         }
     }
 
+    /**
+     * Exports settings + the whole backup index as a plain JSON file the user
+     * picks via SAF. Not encrypted: meant to move between devices, where the
+     * old device's keystore key no longer exists. Contains file names and
+     * destination chat ids - the file deserves the same care as a backup.
+     */
+    suspend fun exportIndexToFile(target: Uri): Int = withContext(Dispatchers.IO) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val settingsObj = JSONObject()
+        prefs.all.forEach { (k, v) ->
+            when (v) {
+                is Set<*> -> settingsObj.put(k, JSONArray(v))
+                else -> settingsObj.put(k, v)
+            }
+        }
+        val array = JSONArray()
+        db.dao().all().forEach { e ->
+            array.put(JSONObject().apply {
+                put("hash", e.contentHash)
+                put("name", e.name)
+                put("size", e.sizeBytes)
+                put("isVideo", e.isVideo)
+                put("status", e.status)
+                put("messageIds", e.telegramMessageIds)
+                put("ivs", e.chunkIvs)
+                put("partChecksums", e.partChecksums)
+                put("partIds", e.uploadedPartIds)
+                put("uploadedAt", e.uploadedAt)
+            })
+        }
+        val payload = JSONObject().apply {
+            put("version", 1)
+            put("kind", "8cloudgallery-file-export")
+            put("exportedAt", System.currentTimeMillis())
+            put("settings", settingsObj)
+            put("entries", array)
+        }
+        context.contentResolver.openOutputStream(target)?.use { out ->
+            out.write(payload.toString(2).toByteArray(Charsets.UTF_8))
+        } ?: throw TdException(0, "cannot write export file")
+        array.length()
+    }
+
+    /**
+     * Imports a file produced by [exportIndexToFile]. Restores settings and
+     * upserts index rows. Imported mediaStoreIds are dropped (they are
+     * per-device); the next scan adopts local files by content hash.
+     * Returns the number of entries imported.
+     */
+    suspend fun importIndexFromFile(source: Uri): Int = withContext(Dispatchers.IO) {
+        val text = context.contentResolver.openInputStream(source)?.use {
+            it.readBytes().toString(Charsets.UTF_8)
+        } ?: throw TdException(0, "cannot read import file")
+        val root = JSONObject(text)
+        if (root.optString("kind") != "8cloudgallery-file-export") {
+            throw TdException(0, "not an 8CloudGallery export file")
+        }
+        // Settings first.
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val settingsObj = root.optJSONObject("settings")
+        if (settingsObj != null) {
+            val editor = prefs.edit()
+            val keys = settingsObj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                when (val v = settingsObj.get(k)) {
+                    is Boolean -> editor.putBoolean(k, v)
+                    is Int -> editor.putInt(k, v)
+                    is Long -> editor.putLong(k, v)
+                    is Double -> editor.putFloat(k, v.toFloat())
+                    is String -> editor.putString(k, v)
+                    is JSONArray -> {
+                        val set = mutableSetOf<String>()
+                        for (i in 0 until v.length()) set.add(v.getString(i))
+                        editor.putStringSet(k, set)
+                    }
+                    else -> {}
+                }
+            }
+            editor.apply()
+        }
+        // Index rows: adopt-by-hash, so imported rows start with mediaStoreId 0.
+        val array = root.getJSONArray("entries")
+        var imported = 0
+        val now = System.currentTimeMillis()
+        for (i in 0 until array.length()) {
+            val o = array.getJSONObject(i)
+            val hash = o.getString("hash")
+            if (db.dao().byHash(hash) != null) continue
+            db.dao().upsert(
+                BackupEntry(
+                    contentHash = hash,
+                    mediaStoreId = 0,
+                    name = o.getString("name"),
+                    sizeBytes = o.getLong("size"),
+                    isVideo = o.getBoolean("isVideo"),
+                    status = o.getString("status"),
+                    telegramMessageIds = o.optString("messageIds", ""),
+                    chunkIvs = o.optString("ivs", ""),
+                    partChecksums = o.optString("partChecksums", ""),
+                    uploadedPartIds = o.optString("partIds", ""),
+                    uploadedAt = o.optLong("uploadedAt", 0L),
+                    lastSeenAt = now
+                )
+            )
+            imported++
+        }
+        app.eightcloud.gallery.AppLog.log("backup", "file import: " + imported + " entries, settings restored")
+        imported
+    }
+
     /** Imports the newest index document found in Saved Messages. Returns imported count. */
     suspend fun importIndex(): Int = withContext(Dispatchers.IO) {
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -533,6 +644,34 @@ class BackupEngine(private val context: Context) {
 
     suspend fun isIndexEmpty(): Boolean = withContext(Dispatchers.IO) {
         db.dao().rowCount() == 0
+    }
+
+    /**
+     * Spot-checks a random sample of backed-up entries against the cloud and
+     * flags missing ones. Returns the number missing. Used by the weekly
+     * backup-health check.
+     */
+    suspend fun verifySample(sampleSize: Int = 25): Int = withContext(Dispatchers.IO) {
+        val chatId = destinationChat()
+        val backedUp = db.dao().all().filter {
+            it.status == BackupEntry.BACKED_UP && it.telegramMessageIds.isNotBlank()
+        }
+        if (backedUp.isEmpty()) return@withContext 0
+        val sample = backedUp.shuffled().take(sampleSize)
+        var missing = 0
+        for (entry in sample) {
+            val ids = entry.telegramMessageIds.split(",").mapNotNull { it.toLongOrNull() }
+            if (ids.isEmpty()) continue
+            val found = runCatching {
+                td.getMessages(chatId, ids.toLongArray()).messages.count { it != null }
+            }.getOrDefault(0)
+            if (found == 0) {
+                db.dao().setStatus(entry.contentHash, BackupEntry.MISSING_IN_CLOUD)
+                missing++
+            }
+        }
+        app.eightcloud.gallery.AppLog.log("backup", "health check: " + sample.size + " sampled, " + missing + " missing")
+        missing
     }
 
     suspend fun counts(): Pair<Int, Int> {

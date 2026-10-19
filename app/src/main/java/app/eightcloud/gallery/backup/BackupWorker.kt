@@ -166,10 +166,13 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                     .setConstraints(constraints)
                     .build()
             )
+            // The weekly backup-health check rides along with the backup toggle.
+            HealthCheckWorker.schedule(context)
         }
 
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_NAME)
+            HealthCheckWorker.cancel(context)
         }
 
         fun runNow(context: Context, wifiOnly: Boolean, ids: Set<Long>? = null) {

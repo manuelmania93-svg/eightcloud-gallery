@@ -95,6 +95,10 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         td.addAuthWatcher(watcher)
         refreshCounts()
         loadBuckets()
+        // Bootstrap the weekly health check for already-enabled backups.
+        if (_backupEnabled.value) {
+            app.eightcloud.gallery.backup.HealthCheckWorker.keepScheduled(getApplication())
+        }
     }
 
     private val _cloudOnly = MutableStateFlow<List<BackupEntry>>(emptyList())
@@ -275,6 +279,16 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         _error.value = if (imported == 0) "No cloud backups found to rebuild from"
         else "Rebuilt $imported cloud entries - they won't upload again"
         refreshCounts()
+    }
+
+    fun exportToFile(uri: android.net.Uri) = guard {
+        val n = engine.exportIndexToFile(uri)
+        _error.value = "Exported $n index entries + settings to file"
+    }
+
+    fun importFromFile(uri: android.net.Uri) = guard {
+        val n = engine.importIndexFromFile(uri)
+        _error.value = "Imported $n index entries + settings from file"
     }
 
     fun refreshCounts() {
