@@ -92,6 +92,41 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         loadBuckets()
     }
 
+    private val _cloudOnly = MutableStateFlow<List<BackupEntry>>(emptyList())
+    val cloudOnly: StateFlow<List<BackupEntry>> = _cloudOnly
+
+    private val _restoreProgress = MutableStateFlow<Triple<Int, Int, String>?>(null)
+    val restoreProgress: StateFlow<Triple<Int, Int, String>?> = _restoreProgress
+
+    fun loadCloudOnly() {
+        viewModelScope.launch {
+            runCatching { _cloudOnly.value = engine.cloudOnlyEntries() }
+        }
+    }
+
+    fun restoreSelected(hashes: Set<String>) {
+        if (_busy.value) return
+        _busy.value = true
+        _error.value = null
+        viewModelScope.launch {
+            try {
+                val result = engine.restore(hashes) { done, total, name ->
+                    _restoreProgress.value = Triple(done, total, name)
+                }
+                _restoreProgress.value = null
+                if (result.failed > 0) {
+                    _error.value = "${result.failed} of ${result.restored + result.failed} restores failed"
+                }
+            } catch (e: Exception) {
+                _restoreProgress.value = null
+                _error.value = e.message ?: "Restore failed"
+            } finally {
+                _busy.value = false
+                loadCloudOnly()
+            }
+        }
+    }
+
     override fun onCleared() {
         td.removeAuthWatcher(watcher)
     }

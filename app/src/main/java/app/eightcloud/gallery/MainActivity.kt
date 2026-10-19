@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
 import app.eightcloud.gallery.ui.AlbumsScreen
 import app.eightcloud.gallery.ui.DuplicatesScreen
+import app.eightcloud.gallery.ui.RestoreScreen
 import app.eightcloud.gallery.ui.TrashScreen
 import app.eightcloud.gallery.ui.BackupScreen
 import app.eightcloud.gallery.ui.BackupViewModel
@@ -185,6 +186,10 @@ fun EightCloudApp() {
                             Screen.ALBUMS -> AlbumsScreen(viewModel)
                             Screen.TRASH -> TrashScreen(viewModel, onBack = { viewModel.backToGrid() })
                             Screen.DUPLICATES -> DuplicatesScreen(viewModel, onBack = { viewModel.backToGrid() })
+                            Screen.RESTORE -> {
+                                val backupViewModel: BackupViewModel = viewModel()
+                                RestoreScreen(backupViewModel, onBack = { viewModel.backToGrid() })
+                            }
                             Screen.SETTINGS -> SettingsScreen(viewModel)
                             Screen.BACKUP -> {
                                 val backupViewModel: BackupViewModel = viewModel()

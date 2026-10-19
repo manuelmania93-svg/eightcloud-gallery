@@ -1,6 +1,8 @@
 package app.eightcloud.gallery.backup
 
 import android.content.ContentUris
+import android.content.ContentValues
+import android.os.Build
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
@@ -20,6 +22,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
+import java.io.InputStream
+import java.io.SequenceInputStream
 import java.io.FileOutputStream
 
 /**
@@ -346,6 +350,93 @@ class BackupEngine(private val context: Context) {
         val backed = db.dao().backedUpCount()
         val pending = db.dao().byStatus(BackupEntry.PENDING).size
         return backed to pending
+    }
+
+    data class RestoreResult(val restored: Int, val failed: Int)
+
+    suspend fun cloudOnlyEntries(): List<BackupEntry> = withContext(Dispatchers.IO) {
+        db.dao().all().filter { it.status == BackupEntry.CLOUD_ONLY }
+    }
+
+    suspend fun restore(
+        hashes: Set<String>,
+        onProgress: (done: Int, total: Int, name: String) -> Unit = { _, _, _ -> }
+    ): RestoreResult = withContext(Dispatchers.IO) {
+        val chatId = destinationChat()
+        val key = KeystoreKeys.backupKey()
+        val targets = db.dao().all().filter { it.contentHash in hashes }
+        var restored = 0
+        var failed = 0
+        targets.forEachIndexed { index, entry ->
+            onProgress(index, targets.size, entry.name)
+            try {
+                restoreOne(entry, chatId, key)
+                restored++
+            } catch (e: Exception) {
+                failed++
+            }
+        }
+        onProgress(targets.size, targets.size, "")
+        RestoreResult(restored, failed)
+    }
+
+    private suspend fun restoreOne(entry: BackupEntry, chatId: Long, key: javax.crypto.SecretKey) {
+        val msgIds = entry.telegramMessageIds.split(',')
+            .mapNotNull { it.trim().toLongOrNull() }
+            .sorted()
+            .toLongArray()
+        require(msgIds.isNotEmpty()) { "no telegram messages recorded" }
+        val messages = td.getMessages(chatId, msgIds)
+        val parts = messages.messages.filterNotNull().sortedBy { it.id }.map { msg ->
+            val doc = (msg.content as? TdApi.MessageDocument)?.document
+                ?: throw IllegalStateException("message ${msg.id} is not a document")
+            td.downloadFile(doc.document.id)
+        }
+        val ivHex = entry.chunkIvs.split(',').first().trim()
+        val iv = ivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        val isVideo = entry.isVideo
+        val collection = if (isVideo)
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        else
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, entry.name)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, if (isVideo) "Movies/8CloudGallery" else "Pictures/8CloudGallery")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+        val uri = context.contentResolver.insert(collection, values)
+            ?: throw IllegalStateException("MediaStore insert failed")
+        try {
+            context.contentResolver.openOutputStream(uri)!!.use { out ->
+                if (parts.size == 1) {
+                    FileInputStream(File(parts[0])).use { input ->
+                        BackupCrypto.decryptStream(key, iv, input, out)
+                    }
+                } else {
+                    val streams = parts.map { FileInputStream(File(it)) as InputStream }
+                    SequenceInputStream(java.util.Collections.enumeration(streams)).use { input ->
+                        BackupCrypto.decryptStream(key, iv, input, out)
+                    }
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+                context.contentResolver.update(uri, done, null, null)
+            }
+        } catch (e: Exception) {
+            context.contentResolver.delete(uri, null, null)
+            throw e
+        }
+        db.dao().upsert(
+            entry.copy(
+                mediaStoreId = ContentUris.parseId(uri),
+                status = BackupEntry.BACKED_UP,
+                lastSeenAt = System.currentTimeMillis()
+            )
+        )
     }
 
     private fun uriFor(entry: BackupEntry): Uri {

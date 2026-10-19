@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ThemeMode { CLOUD_SKY, SYSTEM, LIGHT, DARK }
-enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES }
+enum class Screen { GRID, VIEWER, SETTINGS, BACKUP, ALBUMS, TRASH, DUPLICATES, RESTORE }
 enum class StatusFilter { ALL, BACKED_UP, PENDING, CLOUD_ONLY }
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
@@ -261,6 +261,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun openAlbums() { _screen.value = Screen.ALBUMS }
     fun openTrash() { _screen.value = Screen.TRASH }
     fun openDuplicates() { _screen.value = Screen.DUPLICATES }
+    fun openRestore() { _screen.value = Screen.RESTORE }
 
     private val _appLock = MutableStateFlow(prefs.getBoolean("appLock", false))
     val appLock: StateFlow<Boolean> = _appLock
