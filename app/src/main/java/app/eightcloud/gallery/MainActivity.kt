@@ -50,7 +50,7 @@ import app.eightcloud.gallery.ui.SettingsScreen
 import app.eightcloud.gallery.ui.ThemeMode
 import app.eightcloud.gallery.ui.ViewerScreen
 
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -83,6 +83,8 @@ private fun requiredPermissions(): Array<String> = when {
 fun EightCloudApp() {
     val viewModel: GalleryViewModel = viewModel()
     val themeMode by viewModel.themeMode.collectAsState()
+    val appLock by viewModel.appLock.collectAsState()
+    val appUnlocked by viewModel.appUnlocked.collectAsState()
     val permissionGranted by viewModel.permissionGranted.collectAsState()
     val screen by viewModel.screen.collectAsState()
     val context = LocalContext.current
@@ -101,7 +103,27 @@ fun EightCloudApp() {
             LaunchedEffect(granted) {
                 if (granted && !permissionGranted) viewModel.setPermissionGranted(true)
             }
-            if (granted) {
+            if (granted && appLock && !appUnlocked) {
+                LockScreen(onUnlock = {
+                    val executor = ContextCompat.getMainExecutor(context)
+                    val prompt = androidx.biometric.BiometricPrompt(
+                        context as androidx.fragment.app.FragmentActivity,
+                        executor,
+                        object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+                            override fun onAuthenticationSucceeded(
+                                result: androidx.biometric.BiometricPrompt.AuthenticationResult
+                            ) {
+                                viewModel.unlockApp()
+                            }
+                        }
+                    )
+                    val info = androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Unlock 8CloudGallery")
+                        .setDeviceCredentialAllowed(true)
+                        .build()
+                    prompt.authenticate(info)
+                })
+            } else if (granted) {
                 androidx.compose.material3.Scaffold(
                     bottomBar = {
                         if (screen != Screen.VIEWER) {
@@ -174,6 +196,26 @@ fun EightCloudApp() {
             } else {
                 PermissionRequest(onRequest = { launcher.launch(requiredPermissions()) })
             }
+        }
+    }
+}
+
+@Composable
+private fun LockScreen(onUnlock: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "8CloudGallery is locked",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center
+        )
+        Button(onClick = onUnlock, modifier = Modifier.padding(top = 16.dp)) {
+            Text("Unlock")
         }
     }
 }

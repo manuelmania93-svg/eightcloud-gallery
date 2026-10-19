@@ -262,6 +262,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun openTrash() { _screen.value = Screen.TRASH }
     fun openDuplicates() { _screen.value = Screen.DUPLICATES }
 
+    private val _appLock = MutableStateFlow(prefs.getBoolean("appLock", false))
+    val appLock: StateFlow<Boolean> = _appLock
+
+    // In-memory only: locking again happens automatically on process restart.
+    private val _appUnlocked = MutableStateFlow(false)
+    val appUnlocked: StateFlow<Boolean> = _appUnlocked
+
+    fun setAppLock(enabled: Boolean) {
+        _appLock.value = enabled
+        prefs.edit().putBoolean("appLock", enabled).apply()
+    }
+
+    fun unlockApp() { _appUnlocked.value = true }
+
     fun openBackup() { _screen.value = Screen.BACKUP }
 
     fun backToGrid() { _screen.value = Screen.GRID }

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,6 +40,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val columns by viewModel.columns.collectAsState()
     val trashItems by viewModel.trashItems.collectAsState()
     val duplicateGroups by viewModel.duplicateGroups.collectAsState()
+    val appLock by viewModel.appLock.collectAsState()
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
@@ -84,6 +86,33 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.setAppLock(!appLock) }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text("App lock", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Require fingerprint or PIN on start",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = appLock,
+                onCheckedChange = { viewModel.setAppLock(it) }
+            )
+        }
 
         Row(
             modifier = Modifier
