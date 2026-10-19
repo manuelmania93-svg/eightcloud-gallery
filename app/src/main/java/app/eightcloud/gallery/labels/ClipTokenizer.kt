@@ -61,7 +61,7 @@ class ClipTokenizer(vocabLines: List<String>, mergeLines: List<String>) {
             val cs = ArrayList(bs)
             var n = 0
             for (b in 0..255) if (b !in bs) { bs.add(b); cs.add(256 + n); n++ }
-            val out = Array(256) ' '
+            val out = Array(256) { ' ' }
             bs.forEachIndexed { i, b -> out[b] = cs[i].toChar() }
             return out
         }
