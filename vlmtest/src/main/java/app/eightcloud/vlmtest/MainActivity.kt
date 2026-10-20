@@ -129,7 +129,8 @@ class MainActivity : Activity() {
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(question)
-            addView(Button(this@MainActivity).apply { text = "5. Ask AI"; setOnClickListener { ask() } })
+            addView(Button(this@MainActivity).apply { text = "5. Ask (text)"; setOnClickListener { ask(false) } })
+            addView(Button(this@MainActivity).apply { text = "5b. Photo"; setOnClickListener { ask(true) } })
         })
         setContentView(root)
         scope.launch {
@@ -384,7 +385,7 @@ class MainActivity : Activity() {
                     if (!f.exists()) continue
                     // mmap test on the real file: map 3 slices of 700 MB (JVM FileChannel.map is limited to 2 GB each)
                     runCatching {
-                        java.io.RandomAccessFile(f, "r").use { raf ->
+                        java.io.RandomAccessFile(f, "rw").use { raf ->
                             val ch = raf.channel
                             val len = ch.size()
                             val maps = ArrayList<java.nio.MappedByteBuffer>()
@@ -444,11 +445,12 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun ask() {
-        if (engine == null) { say("Load the model first."); return }
-        val f = photos.lastOrNull()
+    private fun ask(withPhoto: Boolean = false) {
+        if (engine == null) { say("Load the model first (2a or 2b), then wait for 'loaded in ... s' and the smoke test line."); return }
+        val f = if (withPhoto) photos.lastOrNull() else null
+        if (withPhoto && f == null) { say("No photo picked. Press 3 first, then load again with vision."); return }
         val q = question.text.toString().ifBlank { if (f != null) "Describe this photo." else "Say hi in three words." }
-        job?.cancel()
+        say("ASK started (${if (f != null) "with photo" else "text only"}, engine $backendName): $q")
         job = scope.launch {
             val r = withContext(Dispatchers.Default) { runCatching { if (f != null) runOne(f, q) else runText(q) } }
             r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${txt.replace("\n", " ")}") }
