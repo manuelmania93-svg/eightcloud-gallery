@@ -55,13 +55,15 @@ class MainActivity : Activity() {
     private var photos: List<File> = emptyList()
     private var job: Job? = null
 
-    private val modelUrl =
-        "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
-    private val modelBytes = 2_588_147_712L
-    // Internal storage on purpose: the runtime memory-maps the model, and app-specific external
-    // storage (FUSE) is a suspect for failed mappings (v0.1.0 loaded, then failed every prompt).
-    private val modelFile get() = File(filesDir, "gemma-4-E2B-it.litertlm")
-    private val oldModelFile get() = File(getExternalFilesDir(null), "gemma-4-E2B-it.litertlm")
+    private var useGpuVariant = false
+    private val modelName get() = if (useGpuVariant) "gemma-4-E2B-it-gpu.litertlm" else "gemma-4-E2B-it.litertlm"
+    private val modelUrl get() = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/$modelName"
+    private val modelBytes get() = if (useGpuVariant) 2_008_432_640L else 2_588_147_712L
+    // SHA-256 from the Hugging Face LFS record of each file.
+    private val modelSha get() = if (useGpuVariant) "a53a59001894c58e6bdb5b9b227709f91a2e3e556baa7d85acf9c55402ba5cf5"
+        else "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+    private val modelFile get() = File(filesDir, modelName)
+    private val oldModelFile get() = File(getExternalFilesDir(null), modelName)
 
     private val prompt = "Look at this image. Answer in exactly this format, nothing else:\n" +
         "MEME: yes or no (image with caption text, or a meme template)\n" +
@@ -79,6 +81,11 @@ class MainActivity : Activity() {
             root.addView(Button(this).apply { this.text = text; setOnClickListener { onClick() } })
         }
         btn("1. Download model (Wi-Fi only, 2.6 GB)") { download() }
+        btn("0. Switch model file (generic 2.6 GB / GPU variant 2.0 GB)") {
+            useGpuVariant = !useGpuVariant
+            say("Model file now: $modelName (${modelBytes / 1_000_000} MB). On disk: ${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB. Verified: ${isVerified()}")
+        }
+        btn("1c. Verify model SHA-256 (required before load)") { verify() }
         btn("1b. Move old model to internal storage (no re-download)") { moveOld() }
         btn("2a. Load model on CPU") { load(false) }
         btn("2b. Load model on GPU") { load(true) }
@@ -90,6 +97,7 @@ class MainActivity : Activity() {
         }
         root.addView(question)
         btn("5. Ask AI") { ask() }
+        btn("Delete current model file") { modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName.") }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
         btn("Stop") { job?.cancel(); say("stopped") }
@@ -176,7 +184,7 @@ class MainActivity : Activity() {
                             }
                         }
                     }
-                    say(if (f.length() == modelBytes) "Download complete and size matches (${f.length()} bytes)."
+                    say(if (f.length() == modelBytes) "Download complete and size matches (${f.length()} bytes). Press 1c to verify."
                         else "Size mismatch: ${f.length()} vs expected $modelBytes. Press download again to resume.")
                 }.onFailure { say("Download error: ${it.message}. Press download again to resume.") }
             }
@@ -184,13 +192,14 @@ class MainActivity : Activity() {
     }
 
     private fun load(gpu: Boolean) {
-        if (!modelFile.exists() || modelFile.length() != modelBytes) { say("Model missing or incomplete."); return }
+        if (!modelFile.exists() || modelFile.length() != modelBytes) { say("Model missing or incomplete (${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB of ${modelBytes / 1_000_000} MB)."); return }
+        if (!isVerified()) { say("Model not SHA-256 verified yet. Press 1c first."); return }
         job?.cancel()
         job = scope.launch {
             runCatching { engine?.close() }
             engine = null
             backendName = if (gpu) "GPU" else "CPU"
-            rec("--- LOAD $backendName --- temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
+            rec("--- LOAD $backendName --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
             val t0 = SystemClock.elapsedRealtime()
             withContext(Dispatchers.Default) {
                 runCatching {
@@ -248,6 +257,40 @@ class MainActivity : Activity() {
         f
     }.getOrNull()
 
+    private val verifiedMarker get() = File(filesDir, "$modelName.verified")
+
+    private fun isVerified(): Boolean {
+        val f = modelFile
+        val m = verifiedMarker
+        return f.exists() && m.exists() && m.readText().trim() == "${f.length()}:${f.lastModified()}:$modelSha"
+    }
+
+    private fun verify() {
+        val f = modelFile
+        if (!f.exists()) { say("No model file."); return }
+        job?.cancel()
+        job = scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    say("Hashing $modelName (${f.length() / 1_000_000} MB) ...")
+                    val md = java.security.MessageDigest.getInstance("SHA-256")
+                    f.inputStream().use { i ->
+                        val buf = ByteArray(1 shl 20)
+                        while (true) { val n = i.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+                    }
+                    val hex = md.digest().joinToString("") { "%02x".format(it) }
+                    if (f.length() == modelBytes && hex == modelSha) {
+                        verifiedMarker.writeText("${f.length()}:${f.lastModified()}:$modelSha")
+                        rec("VERIFY OK $modelName: size ${f.length()} and SHA-256 match Hugging Face.")
+                    } else {
+                        verifiedMarker.delete()
+                        rec("VERIFY FAILED $modelName: size ${f.length()} (expected $modelBytes), sha ${hex.take(12)}... (expected ${modelSha.take(12)}...). Delete and re-download.")
+                    }
+                }.onFailure { rec("Verify error: ${it.message}") }
+            }
+        }
+    }
+
     private suspend fun runText(text: String): Triple<String, Long, Long> {
         val e = engine ?: error("engine not loaded")
         val sb = StringBuilder()
@@ -274,7 +317,7 @@ class MainActivity : Activity() {
                     say("Free internal space: ${free / 1_000_000} MB, copying ${src.length() / 1_000_000} MB ...")
                     if (free < src.length() + 300_000_000L) { say("Not enough free internal storage."); return@runCatching }
                     src.inputStream().use { i -> modelFile.outputStream().use { o -> i.copyTo(o, 1 shl 20) } }
-                    if (modelFile.length() == modelBytes) { src.delete(); say("Moved. Size matches. Old copy deleted.") }
+                    if (modelFile.length() == modelBytes) { src.delete(); say("Moved. Size matches. Old copy deleted. Press 1c to verify.") }
                     else say("Copy size mismatch: ${modelFile.length()}")
                 }.onFailure { say("Move error: ${it.message}") }
             }
@@ -285,7 +328,7 @@ class MainActivity : Activity() {
         job?.cancel()
         job = scope.launch {
             withContext(Dispatchers.IO) {
-                rec("--- DIAGNOSTICS ---")
+                rec("--- DIAGNOSTICS --- model=$modelName verified=${isVerified()}")
                 rec("internal free ${filesDir.usableSpace / 1_000_000} MB; model internal ${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB; model external ${if (oldModelFile.exists()) oldModelFile.length() / 1_000_000 else -1} MB")
                 rec("SDK ${android.os.Build.VERSION.SDK_INT}, ABI ${android.os.Build.SUPPORTED_ABIS.joinToString()}")
                 runCatching { File("/proc/self/limits").readLines().filter { it.startsWith("Max address") || it.startsWith("Max locked") || it.startsWith("Max open") }.forEach { rec(it) } }
