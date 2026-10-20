@@ -61,15 +61,27 @@ class MainActivity : Activity() {
     private var lastTick = 0L
     private var speed = ""
 
-    private var useGpuVariant = false
-    private val modelName get() = if (useGpuVariant) "gemma-4-E2B-it-gpu.litertlm" else "gemma-4-E2B-it.litertlm"
-    private val modelUrl get() = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/$modelName"
-    private val modelBytes get() = if (useGpuVariant) 2_008_432_640L else 2_588_147_712L
-    // SHA-256 from the Hugging Face LFS record of each file.
-    private val modelSha get() = if (useGpuVariant) "a53a59001894c58e6bdb5b9b227709f91a2e3e556baa7d85acf9c55402ba5cf5"
-        else "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+    private class Model(val label: String, val file: String, val url: String, val bytes: Long, val sha: String, val freshEngine: Boolean, val note: String)
+    private val catalog = listOf(
+        Model("A: Gemma 4 E2B official", "gemma-4-E2B-it.litertlm",
+            "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+            2_588_147_712L, "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c", false, "Google, Apache-2.0"),
+        Model("B: Qwen3.5-2B-VL int8", "Qwen3.5-2B-VL_int8.litertlm",
+            "https://huggingface.co/litert-community/Qwen3.5-2B/resolve/main/Qwen3.5-2B-VL_int8.litertlm",
+            3_152_378_448L, "33d9d9014eb36f6349e41efd272596756380ff4d0bce2290d0b77fb39c487120", true, "Qwen, Apache-2.0, litert-community conversion"),
+        Model("C: Huihui abliterated Gemma 4 E2B int8", "Huihui-gemma-4-E2B-it-abliterated.litertlm",
+            "https://huggingface.co/edp1096/Huihui-gemma-4-E2B-it-abliterated-litert-lm/resolve/main/Huihui-gemma-4-E2B-it-abliterated.litertlm",
+            5_247_716_576L, "ebd54bad60896b14acd717a12e0bf6b1020eb69a7c73d9de17a14ee18cf6087e", false, "community abliterated, Apache-2.0, unaudited")
+    )
+    private var modelIdx = 0
+    private val cur get() = catalog[modelIdx]
+    private val modelName get() = cur.file
+    private val modelUrl get() = cur.url
+    private val modelBytes get() = cur.bytes
+    private val modelSha get() = cur.sha
+    private fun freeMb() = filesDir.usableSpace / 1_000_000
     private val modelFile get() = File(filesDir, modelName)
-    private val oldModelFile get() = File(getExternalFilesDir(null), modelName)
+    private val oldModelFile get() = File(getExternalFilesDir(null), "gemma-4-E2B-it.litertlm")
 
     private val prompt = "Look at this image. Answer in exactly this format, nothing else:\n" +
         "MEME: yes or no (image with caption text, or a meme template)\n" +
@@ -79,6 +91,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        modelIdx = getSharedPreferences("sel", Context.MODE_PRIVATE).getInt("idx", 0).coerceIn(0, catalog.size - 1)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 48, 24, 24)
@@ -87,16 +100,25 @@ class MainActivity : Activity() {
         fun btn(text: String, onClick: () -> Unit) {
             buttons.addView(Button(this).apply { this.text = text; textSize = 13f; minHeight = 0; minimumHeight = 0; setPadding(8, 4, 8, 4); setOnClickListener { onClick() } })
         }
-        btn("1. Download model (Wi-Fi only, 2.6 GB)") { download() }
+        btn("1. Download / resume selected model (Wi-Fi only)") { download() }
         btn("1a. Allow background (disable battery optimization)") {
             val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
             if (pm.isIgnoringBatteryOptimizations(packageName)) say("Battery optimization already disabled for this app.")
             else startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }
-        btn("0. Switch model file (generic 2.6 GB / GPU variant 2.0 GB)") {
+        btn("0. Select next model (A Gemma / B Qwen3.5 / C Huihui)") {
             if (Dl.busy.get()) { say("Download in progress. Press Stop first."); return@btn }
-            useGpuVariant = !useGpuVariant
-            say("Model file now: $modelName (${modelBytes / 1_000_000} MB). On disk: ${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB. Verified: ${isVerified()}")
+            engine?.let { runCatching { it.close() } }; engine = null; visionLoaded = false
+            modelIdx = (modelIdx + 1) % catalog.size
+            getSharedPreferences("sel", Context.MODE_PRIVATE).edit().putInt("idx", modelIdx).apply()
+            say("Selected ${cur.label} (${cur.note}). ${modelBytes / 1_000_000} MB. On disk: ${if (modelFile.exists()) modelFile.length() / 1_000_000 else 0} MB. Verified: ${isVerified()}. Free storage: ${freeMb()} MB. Engine unloaded.")
+        }
+        btn("1d. Delete selected model and download it again") {
+            if (Dl.busy.get()) { say("Press Stop first, wait for it to stop."); return@btn }
+            engine?.let { runCatching { it.close() } }; engine = null; visionLoaded = false
+            modelFile.delete(); verifiedMarker.delete()
+            say("Deleted ${cur.label}. Free storage now ${freeMb()} MB. Starting download.")
+            download()
         }
         btn("1c. Verify model SHA-256 (required before load)") { verify() }
         btn("1b. Move old model to internal storage (no re-download)") { moveOld() }
@@ -105,11 +127,11 @@ class MainActivity : Activity() {
         btn("3. Pick photos (up to 30)") { pick() }
         btn("4. Run benchmark on picked photos") { benchmark() }
         question = EditText(this).apply {
-            hint = "Ask AI (text only if no photo picked)"
+            hint = "Question (5 = text only, no photo / 5b = about the last picked photo)"
             inputType = InputType.TYPE_CLASS_TEXT
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        btn("Delete current model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName.") }
+        btn("Delete selected model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; engine?.let { runCatching { it.close() } }; engine = null; visionLoaded = false; modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName. Free storage ${freeMb()} MB.") }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
         btn("Stop") { Dl.cancel = true; job?.cancel(); getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); say("stopped") }
@@ -129,8 +151,8 @@ class MainActivity : Activity() {
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(question)
-            addView(Button(this@MainActivity).apply { text = "5. Ask (text)"; setOnClickListener { ask(false) } })
-            addView(Button(this@MainActivity).apply { text = "5b. Photo"; setOnClickListener { ask(true) } })
+            addView(Button(this@MainActivity).apply { text = "5. Ask text only"; setOnClickListener { ask(false) } })
+            addView(Button(this@MainActivity).apply { text = "5b. Ask about last photo"; setOnClickListener { ask(true) } })
         })
         setContentView(root)
         scope.launch {
@@ -172,7 +194,7 @@ class MainActivity : Activity() {
         val pmx = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         val hint = if (!pmx.isIgnoringBatteryOptimizations(packageName)) "\nHint: press 1a and allow, so the download survives leaving the app. Also set battery to Unrestricted in system app settings." else ""
         val eng = if (engine != null) " | engine loaded ($backendName)" else ""
-        statusView.text = "ACTIVE FILE: ${if (useGpuVariant) "GPU variant" else "GENERIC"} - $modelName\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$hint"
+        statusView.text = "SELECTED: ${cur.label}\n$modelName | free storage ${freeMb()} MB\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$hint"
     }
 
     private val liveLog get() = File(filesDir, "livelog.txt")
@@ -265,6 +287,10 @@ class MainActivity : Activity() {
     private fun download() {
         if (!onWifi()) { say("Not on unmetered Wi-Fi. Download refused."); return }
         if (Dl.busy.get()) { say("A download is already running. Ignoring this press."); return }
+        val have = if (modelFile.exists()) modelFile.length() else 0L
+        val need = (modelBytes - have) / 1_000_000
+        say("Selected ${cur.label}. Needs ${need} MB more, free storage ${freeMb()} MB.")
+        if (freeMb() < need + 500) { say("Not enough free storage (need ${need + 500} MB incl. 500 MB margin). Delete another model first (button 0 to select it, then Delete)."); return }
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
@@ -285,13 +311,13 @@ class MainActivity : Activity() {
     }
 
     /** Loads the engine. vision=true also loads the vision encoder (GPU first as in Gallery, CPU if that fails). */
-    private suspend fun loadEngine(gpu: Boolean, vision: Boolean, smoke: Boolean) {
+    private suspend fun loadEngine(gpu: Boolean, vision: Boolean, smoke: Boolean, quiet: Boolean = false) {
         runCatching { engine?.close() }
         engine = null
         visionLoaded = false
         backendName = if (gpu) "GPU" else "CPU"
         loadedGpu = gpu
-        rec("--- LOAD $backendName vision=${if (vision) "on" else "off"} --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
+        if (!quiet) rec("--- LOAD $backendName vision=${if (vision) "on" else "off"} --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
         val t0 = SystemClock.elapsedRealtime()
         withContext(Dispatchers.Default) {
             val visionOptions: List<Backend?> = if (vision) listOf(Backend.GPU(), Backend.CPU()) else listOf(null)
@@ -303,7 +329,7 @@ class MainActivity : Activity() {
                         visionBackend = vb,
                         maxNumTokens = 4000
                     )
-                    rec("config: backend=$backendName vision=${if (vb == null) "off" else if (vb is Backend.GPU) "GPU" else "CPU"} maxNumTokens=4000 cacheDir=default")
+                    if (!quiet) rec("config: backend=$backendName vision=${if (vb == null) "off" else if (vb is Backend.GPU) "GPU" else "CPU"} maxNumTokens=4000 cacheDir=default")
                     val e = Engine(cfg)
                     e.initialize()
                     engine = e
@@ -313,7 +339,7 @@ class MainActivity : Activity() {
             }
         }
         if (engine != null) {
-            rec("loaded in ${(SystemClock.elapsedRealtime() - t0) / 1000.0} s, PSS ${pssMb()} MB")
+            if (!quiet) rec("loaded in ${(SystemClock.elapsedRealtime() - t0) / 1000.0} s, PSS ${pssMb()} MB")
             if (smoke) {
                 val r = withContext(Dispatchers.Default) { runCatching { runText("Say hi in three words.") } }
                 r.onSuccess { (txt, first, total) -> rec("TEXT SMOKE TEST OK first=${first}ms total=${total}ms :: ${txt.replace("\n", " ")}") }
@@ -407,7 +433,32 @@ class MainActivity : Activity() {
 
     private fun sampler() = ConversationConfig(samplerConfig = SamplerConfig(topK = 64, topP = 0.95, temperature = 1.0))
 
+    /** Qwen3.5 keeps recurrent state across conversations on one Engine (model card note), so use a fresh Engine per request. */
+    private suspend fun freshIfNeeded() {
+        if (!cur.freshEngine || engine == null) return
+        val gpu = loadedGpu; val vis = visionLoaded
+        val t0 = SystemClock.elapsedRealtime()
+        loadEngine(gpu, vis, false, quiet = true)
+        say("(fresh engine for this request: ${SystemClock.elapsedRealtime() - t0} ms)")
+    }
+
+    private fun stripThink(raw: String): String = raw.replace(Regex("""<think>.*?</think>""", RegexOption.DOT_MATCHES_ALL), "").trim()
+
+    private val refusal = Regex("""i (can('|’)?t|cannot|am unable to|won('|’)?t|'m not able to|am not able to)\b|i('|’)?m sorry|unable to (help|assist|describe)|as an ai|against my (guidelines|policy)|not (able|allowed) to (describe|help|assist)""", RegexOption.IGNORE_CASE)
+
+    /** Cleans model output: strips think blocks and flags refusals or format failures, so they are never used as tags. */
+    private fun judge(raw: String): String {
+        val t = stripThink(raw)
+        val hasFormat = Regex("""MEME:\s*(yes|no)""", RegexOption.IGNORE_CASE).containsMatchIn(t)
+        return when {
+            !hasFormat && refusal.containsMatchIn(t) -> "[REFUSAL - IGNORED, NO TAGS] $t"
+            !hasFormat -> "[FORMAT FAIL - IGNORED] $t"
+            else -> t
+        }
+    }
+
     private suspend fun runText(text: String): Triple<String, Long, Long> {
+        freshIfNeeded()
         val e = engine ?: error("engine not loaded")
         val sb = StringBuilder()
         val t0 = SystemClock.elapsedRealtime()
@@ -490,6 +541,7 @@ class MainActivity : Activity() {
     }
 
     private suspend fun runOne(file: File, text: String): Triple<String, Long, Long> {
+        freshIfNeeded()
         val e = engine ?: error("engine not loaded")
         val sb = StringBuilder()
         val t0 = SystemClock.elapsedRealtime()
@@ -516,7 +568,7 @@ class MainActivity : Activity() {
                 val r = withContext(Dispatchers.Default) { runCatching { runOne(f, prompt) } }
                 r.onSuccess { (txt, first, total) ->
                     totals += total; firsts += first
-                    rec("#$i first=${first}ms total=${total}ms temp=${tempC()}C :: ${txt.replace("\n", " | ")}")
+                    rec("#$i first=${first}ms total=${total}ms temp=${tempC()}C :: ${judge(txt).replace("\n", " | ")}")
                 }.onFailure { rec("#$i ERROR ${it.javaClass.simpleName}: ${it.message}") }
             }
             if (totals.isNotEmpty()) {
@@ -536,7 +588,7 @@ class MainActivity : Activity() {
         job = scope.launch {
             if (f != null && !ensureVision()) { rec("ASK aborted: vision engine could not be loaded."); return@launch }
             val r = withContext(Dispatchers.Default) { runCatching { if (f != null) runOne(f, q) else runText(q) } }
-            r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${txt.replace("\n", " ")}") }
+            r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${stripThink(txt).replace("\n", " ")}") }
                 .onFailure { rec("ASK ERROR ${it.javaClass.simpleName}: ${it.message}") }
         }
     }
