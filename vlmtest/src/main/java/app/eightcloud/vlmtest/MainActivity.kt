@@ -102,10 +102,10 @@ class MainActivity : Activity() {
         }
         root.addView(question)
         btn("5. Ask AI") { ask() }
-        btn("Delete current model file") { modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName.") }
+        btn("Delete current model file") { if (dlBusy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName.") }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
-        btn("Stop") { job?.cancel(); say("stopped") }
+        btn("Stop") { dlCancel = true; job?.cancel(); say("stopped") }
         statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
         root.addView(statusView, 0)
         log = TextView(this).apply { textSize = 12f; setTextIsSelectable(true) }
@@ -183,16 +183,21 @@ class MainActivity : Activity() {
 
     private fun pssMb(): Long = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }.totalPss / 1024L
 
+    private val dlBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var dlCancel = false
+
     private fun download() {
         if (!onWifi()) { say("Not on unmetered Wi-Fi. Download refused."); return }
-        job?.cancel()
-        job = scope.launch {
+        if (!dlBusy.compareAndSet(false, true)) { say("A download is already running. Ignoring this press."); return }
+        dlCancel = false
+        scope.launch {
             withContext(Dispatchers.IO) {
                 dlActive = true
                 runCatching {
                     val f = modelFile
+                    if (f.exists() && f.length() > modelBytes) { say("File was larger than expected (${f.length()}). Deleted, starting over."); f.delete(); verifiedMarker.delete() }
                     var have = if (f.exists()) f.length() else 0L
-                    if (have >= modelBytes) { say("Model already complete."); return@runCatching }
+                    if (have == modelBytes) { say("Model already complete. Press 1c."); return@runCatching }
                     val c = URL(modelUrl).openConnection() as HttpURLConnection
                     c.instanceFollowRedirects = true
                     if (have > 0) c.setRequestProperty("Range", "bytes=$have-")
@@ -200,26 +205,27 @@ class MainActivity : Activity() {
                     c.readTimeout = 30000
                     val code = c.responseCode
                     if (code != 200 && code != 206) { say("HTTP $code"); return@runCatching }
-                    if (code == 200 && have > 0) { f.delete(); have = 0 }
-                    say("Downloading from ${have / 1_000_000} MB ...")
-                    var last = SystemClock.elapsedRealtime()
+                    if (code == 200 && have > 0) { say("Server ignored Range (HTTP 200). Restarting from 0."); f.delete(); have = 0 }
+                    verifiedMarker.delete()
+                    say("Downloading from ${have / 1_000_000} MB (HTTP $code) ...")
                     c.inputStream.use { input ->
                         java.io.FileOutputStream(f, have > 0).use { out ->
                             val buf = ByteArray(1 shl 16)
-                            while (true) {
-                                val n = input.read(buf)
+                            while (have < modelBytes && !dlCancel) {
+                                val n = input.read(buf, 0, minOf(buf.size.toLong(), modelBytes - have).toInt())
                                 if (n < 0) break
                                 out.write(buf, 0, n)
                                 have += n
-                                val now = SystemClock.elapsedRealtime()
-                                if (now - last > 5000) { last = now; say("  ${have * 100 / modelBytes}% (${have / 1_000_000} MB)") }
                             }
+                            out.fd.sync()
                         }
                     }
-                    say(if (f.length() == modelBytes) "Download complete and size matches (${f.length()} bytes). Press 1c to verify."
-                        else "Size mismatch: ${f.length()} vs expected $modelBytes. Press download again to resume.")
-                }.onFailure { say("Download error: ${it.message}. Press download again to resume.") }
+                    say(if (dlCancel) "Stopped at ${f.length()} bytes. Press 1 to resume."
+                        else if (f.length() == modelBytes) "Download complete, size matches (${f.length()} bytes). Press 1c to verify."
+                        else "Incomplete: ${f.length()} of $modelBytes. Press 1 to resume.")
+                }.onFailure { say("Download error: ${it.message}. Press 1 to resume.") }
                 dlActive = false
+                dlBusy.set(false)
             }
         }
     }
