@@ -85,7 +85,7 @@ class MainActivity : Activity() {
         }
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun btn(text: String, onClick: () -> Unit) {
-            buttons.addView(Button(this).apply { this.text = text; setOnClickListener { onClick() } })
+            buttons.addView(Button(this).apply { this.text = text; textSize = 13f; minHeight = 0; minimumHeight = 0; setPadding(8, 4, 8, 4); setOnClickListener { onClick() } })
         }
         btn("1. Download model (Wi-Fi only, 2.6 GB)") { download() }
         btn("1a. Allow background (disable battery optimization)") {
@@ -122,7 +122,7 @@ class MainActivity : Activity() {
         }
         root.addView(ScrollView(this).apply {
             addView(buttons)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 3f)
         })
         root.addView(scroll)
         // Input bar at the bottom, always visible above the keyboard (adjustResize).
