@@ -259,38 +259,62 @@ class MainActivity : Activity() {
         say("Download started in background service (notification shows progress). You can leave the app.")
     }
 
+    @Volatile private var loadedGpu = false
+    @Volatile private var visionLoaded = false
+
     private fun load(gpu: Boolean) {
         if (!modelFile.exists() || modelFile.length() != modelBytes) { say("Model missing or incomplete (${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB of ${modelBytes / 1_000_000} MB)."); return }
         if (!isVerified()) { say("Model not SHA-256 verified yet. Press 1c first."); return }
         job?.cancel()
-        job = scope.launch {
-            runCatching { engine?.close() }
-            engine = null
-            backendName = if (gpu) "GPU" else "CPU"
-            rec("--- LOAD $backendName --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
-            val t0 = SystemClock.elapsedRealtime()
-            withContext(Dispatchers.Default) {
-                runCatching {
+        job = scope.launch { loadEngine(gpu, vision = false, smoke = true) }
+    }
+
+    /** Loads the engine. vision=true also loads the vision encoder (GPU first as in Gallery, CPU if that fails). */
+    private suspend fun loadEngine(gpu: Boolean, vision: Boolean, smoke: Boolean) {
+        runCatching { engine?.close() }
+        engine = null
+        visionLoaded = false
+        backendName = if (gpu) "GPU" else "CPU"
+        loadedGpu = gpu
+        rec("--- LOAD $backendName vision=${if (vision) "on" else "off"} --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
+        val t0 = SystemClock.elapsedRealtime()
+        withContext(Dispatchers.Default) {
+            val visionOptions: List<Backend?> = if (vision) listOf(Backend.GPU(), Backend.CPU()) else listOf(null)
+            for (vb in visionOptions) {
+                val ok = runCatching {
                     val cfg = EngineConfig(
                         modelPath = modelFile.absolutePath,
                         backend = if (gpu) Backend.GPU() else Backend.CPU(),
-                        visionBackend = if (photos.isEmpty()) null else if (gpu) Backend.GPU() else Backend.CPU(),
+                        visionBackend = vb,
                         maxNumTokens = 4000
                     )
-                    rec("config: backend=$backendName vision=${if (photos.isEmpty()) "off (pick photos BEFORE loading to enable)" else "on"} maxNumTokens=4000 cacheDir=default")
+                    rec("config: backend=$backendName vision=${if (vb == null) "off" else if (vb is Backend.GPU) "GPU" else "CPU"} maxNumTokens=4000 cacheDir=default")
                     val e = Engine(cfg)
                     e.initialize()
                     engine = e
-                }.onFailure { rec("LOAD FAILED: ${it.javaClass.simpleName}: ${it.message}"); nativeLog("after load failure") }
+                    visionLoaded = vb != null
+                }.onFailure { rec("LOAD FAILED: ${it.javaClass.simpleName}: ${it.message}"); nativeLog("after load failure") }.isSuccess
+                if (ok) break
             }
-            if (engine != null) {
-                rec("loaded in ${(SystemClock.elapsedRealtime() - t0) / 1000.0} s, PSS ${pssMb()} MB")
+        }
+        if (engine != null) {
+            rec("loaded in ${(SystemClock.elapsedRealtime() - t0) / 1000.0} s, PSS ${pssMb()} MB")
+            if (smoke) {
                 val r = withContext(Dispatchers.Default) { runCatching { runText("Say hi in three words.") } }
                 r.onSuccess { (txt, first, total) -> rec("TEXT SMOKE TEST OK first=${first}ms total=${total}ms :: ${txt.replace("\n", " ")}") }
                     .onFailure { rec("TEXT SMOKE TEST FAILED (engine loaded but unusable): ${it.javaClass.simpleName}: ${it.message}") }
                 nativeLog("after smoke test")
             }
         }
+    }
+
+    /** Makes sure the engine has the vision encoder; reloads automatically when needed. */
+    private suspend fun ensureVision(): Boolean {
+        if (engine != null && visionLoaded) return true
+        if (!modelFile.exists() || modelFile.length() != modelBytes || !isVerified()) { rec("Model missing or not verified. Download and verify first."); return false }
+        rec("Vision encoder not loaded. Reloading ${if (engine != null) backendName else "CPU"} engine with vision (automatic).")
+        loadEngine(if (engine != null) loadedGpu else false, vision = true, smoke = false)
+        return engine != null && visionLoaded
     }
 
     private fun pick() {
@@ -466,10 +490,10 @@ class MainActivity : Activity() {
     }
 
     private fun benchmark() {
-        if (engine == null) { say("Load the model first."); return }
-        if (photos.isEmpty()) { say("Pick photos first."); return }
+        if (photos.isEmpty()) { say("Pick photos first (button 3)."); return }
         job?.cancel()
         job = scope.launch {
+            if (!ensureVision()) { rec("Benchmark aborted: vision engine could not be loaded."); return@launch }
             rec("--- BENCHMARK $backendName n=${photos.size} --- temp ${tempC()}C battery ${battery()}%")
             val totals = mutableListOf<Long>()
             val firsts = mutableListOf<Long>()
@@ -489,12 +513,13 @@ class MainActivity : Activity() {
     }
 
     private fun ask(withPhoto: Boolean = false) {
-        if (engine == null) { say("Load the model first (2a or 2b), then wait for 'loaded in ... s' and the smoke test line."); return }
+        if (!withPhoto && engine == null) { say("Load the model first (2a or 2b), then wait for 'loaded in ... s' and the smoke test line."); return }
         val f = if (withPhoto) photos.lastOrNull() else null
-        if (withPhoto && f == null) { say("No photo picked. Press 3 first, then load again with vision."); return }
+        if (withPhoto && f == null) { say("No photo picked. Press 3 first."); return }
         val q = question.text.toString().ifBlank { if (f != null) "Describe this photo." else "Say hi in three words." }
         say("ASK started (${if (f != null) "with photo" else "text only"}, engine $backendName): $q")
         job = scope.launch {
+            if (f != null && !ensureVision()) { rec("ASK aborted: vision engine could not be loaded."); return@launch }
             val r = withContext(Dispatchers.Default) { runCatching { if (f != null) runOne(f, q) else runText(q) } }
             r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${txt.replace("\n", " ")}") }
                 .onFailure { rec("ASK ERROR ${it.javaClass.simpleName}: ${it.message}") }
