@@ -91,6 +91,7 @@ class MainActivity : Activity() {
             else startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }
         btn("0. Switch model file (generic 2.6 GB / GPU variant 2.0 GB)") {
+            if (Dl.busy.get()) { say("Download in progress. Press Stop first."); return@btn }
             useGpuVariant = !useGpuVariant
             say("Model file now: $modelName (${modelBytes / 1_000_000} MB). On disk: ${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB. Verified: ${isVerified()}")
         }
@@ -156,7 +157,7 @@ class MainActivity : Activity() {
         val pmx = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         val hint = if (!pmx.isIgnoringBatteryOptimizations(packageName)) "\nHint: press 1a and allow, so the download survives leaving the app. Also set battery to Unrestricted in system app settings." else ""
         val eng = if (engine != null) " | engine loaded ($backendName)" else ""
-        statusView.text = "$modelName\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$hint"
+        statusView.text = "ACTIVE FILE: ${if (useGpuVariant) "GPU variant" else "GENERIC"} - $modelName\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$hint"
     }
 
     private fun say(s: String) {
@@ -277,7 +278,12 @@ class MainActivity : Activity() {
     }
 
     private fun verify() {
+        if (Dl.busy.get()) { say("Download in progress. Wait for COMPLETE, then press 1c."); return }
         val f = modelFile
+        val modelName = this.modelName
+        val modelBytes = this.modelBytes
+        val modelSha = this.modelSha
+        val marker = verifiedMarker
         if (!f.exists()) { say("No model file."); return }
         job?.cancel()
         job = scope.launch {
@@ -291,10 +297,10 @@ class MainActivity : Activity() {
                     }
                     val hex = md.digest().joinToString("") { "%02x".format(it) }
                     if (f.length() == modelBytes && hex == modelSha) {
-                        verifiedMarker.writeText("${f.length()}:${f.lastModified()}:$modelSha")
+                        marker.writeText("${f.length()}:${f.lastModified()}:$modelSha")
                         rec("VERIFY OK $modelName: size ${f.length()} and SHA-256 match Hugging Face.")
                     } else {
-                        verifiedMarker.delete()
+                        marker.delete()
                         rec("VERIFY FAILED $modelName: size ${f.length()} (expected $modelBytes), sha ${hex.take(12)}... (expected ${modelSha.take(12)}...). Delete and re-download.")
                     }
                 }.onFailure { rec("Verify error: ${it.message}") }
