@@ -25,6 +25,8 @@ import android.widget.TextView
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import java.io.File
@@ -218,19 +220,21 @@ class MainActivity : Activity() {
                     val cfg = EngineConfig(
                         modelPath = modelFile.absolutePath,
                         backend = if (gpu) Backend.GPU() else Backend.CPU(),
-                        visionBackend = if (gpu) Backend.GPU() else Backend.CPU(),
-                        cacheDir = cacheDir.absolutePath
+                        visionBackend = if (photos.isEmpty()) null else if (gpu) Backend.GPU() else Backend.CPU(),
+                        maxNumTokens = 4000
                     )
+                    rec("config: backend=$backendName vision=${if (photos.isEmpty()) "off (pick photos BEFORE loading to enable)" else "on"} maxNumTokens=4000 cacheDir=default")
                     val e = Engine(cfg)
                     e.initialize()
                     engine = e
-                }.onFailure { rec("LOAD FAILED: ${it.javaClass.simpleName}: ${it.message}") }
+                }.onFailure { rec("LOAD FAILED: ${it.javaClass.simpleName}: ${it.message}"); nativeLog("after load failure") }
             }
             if (engine != null) {
                 rec("loaded in ${(SystemClock.elapsedRealtime() - t0) / 1000.0} s, PSS ${pssMb()} MB")
                 val r = withContext(Dispatchers.Default) { runCatching { runText("Say hi in three words.") } }
                 r.onSuccess { (txt, first, total) -> rec("TEXT SMOKE TEST OK first=${first}ms total=${total}ms :: ${txt.replace("\n", " ")}") }
                     .onFailure { rec("TEXT SMOKE TEST FAILED (engine loaded but unusable): ${it.javaClass.simpleName}: ${it.message}") }
+                nativeLog("after smoke test")
             }
         }
     }
@@ -308,12 +312,14 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun sampler() = ConversationConfig(samplerConfig = SamplerConfig(topK = 64, topP = 0.95, temperature = 1.0))
+
     private suspend fun runText(text: String): Triple<String, Long, Long> {
         val e = engine ?: error("engine not loaded")
         val sb = StringBuilder()
         val t0 = SystemClock.elapsedRealtime()
         var first = -1L
-        e.createConversation().use { conv ->
+        e.createConversation(sampler()).use { conv ->
             conv.sendMessageAsync(Contents.of(Content.Text(text))).collect { chunk ->
                 if (first < 0) first = SystemClock.elapsedRealtime() - t0
                 sb.append(chunk.toString())
@@ -341,6 +347,18 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun nativeLog(label: String) {
+        runCatching {
+            val pid = android.os.Process.myPid()
+            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "--pid=$pid", "-t", "1500"))
+            val lines = proc.inputStream.bufferedReader().readLines()
+            val keys = Regex("section|map|embed|litert|per_layer|memory|alloc|fail|error|warn", RegexOption.IGNORE_CASE)
+            val hits = lines.filter { keys.containsMatchIn(it) }.takeLast(30)
+            rec("--- NATIVE LOG ($label): ${hits.size} matching of ${lines.size} lines ---")
+            hits.forEach { rec(it.take(300)) }
+        }.onFailure { rec("NATIVE LOG unavailable: ${it.javaClass.simpleName}: ${it.message}") }
+    }
+
     private fun diagnostics() {
         job?.cancel()
         job = scope.launch {
@@ -349,7 +367,7 @@ class MainActivity : Activity() {
                 rec("internal free ${filesDir.usableSpace / 1_000_000} MB; model internal ${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB; model external ${if (oldModelFile.exists()) oldModelFile.length() / 1_000_000 else -1} MB")
                 rec("SDK ${android.os.Build.VERSION.SDK_INT}, ABI ${android.os.Build.SUPPORTED_ABIS.joinToString()}")
                 runCatching { File("/proc/self/limits").readLines().filter { it.startsWith("Max address") || it.startsWith("Max locked") || it.startsWith("Max open") }.forEach { rec(it) } }
-                runCatching { File("/proc/meminfo").readLines().take(3).forEach { rec(it) } }
+                runCatching { File("/proc/meminfo").readLines().filter { it.startsWith("Mem") || it.startsWith("Commit") || it.startsWith("Swap") || it.startsWith("Cached") }.forEach { rec(it) } }
                 runCatching { File("/proc/self/status").readLines().filter { it.startsWith("Vm") }.forEach { rec(it) } }
                 runCatching { rec("overcommit=" + File("/proc/sys/vm/overcommit_memory").readText().trim() + " max_map_count=" + File("/proc/sys/vm/max_map_count").readText().trim()) }
                 for (f in listOf(modelFile, oldModelFile)) {
@@ -364,13 +382,13 @@ class MainActivity : Activity() {
                             val slice = 700L * 1024 * 1024
                             while (off < len) {
                                 val n = minOf(slice, len - off)
-                                maps += ch.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, off, n)
+                                maps += ch.map(java.nio.channels.FileChannel.MapMode.PRIVATE, off, n)
                                 off += n
                             }
                             // touch one byte per 64 MB so pages really fault in
                             var sum = 0
                             for (m in maps) { var i = 0; while (i < m.limit()) { sum += m.get(i); i += 64 * 1024 * 1024 } }
-                            rec("MMAP OK ${f.parentFile?.name}/${f.name}: ${maps.size} slices, ${len / 1_000_000} MB (checksum $sum)")
+                            rec("MMAP PRIVATE (copy-on-write, like the runtime) OK ${f.parentFile?.name}/${f.name}: ${maps.size} slices, ${len / 1_000_000} MB (checksum $sum)")
                         }
                     }.onFailure { rec("MMAP FAILED ${f.parentFile?.name}: ${it.javaClass.simpleName}: ${it.message}") }
                 }
@@ -383,7 +401,7 @@ class MainActivity : Activity() {
         val sb = StringBuilder()
         val t0 = SystemClock.elapsedRealtime()
         var first = -1L
-        e.createConversation().use { conv ->
+        e.createConversation(sampler()).use { conv ->
             conv.sendMessageAsync(Contents.of(Content.ImageFile(file.absolutePath), Content.Text(text)))
                 .collect { chunk ->
                     if (first < 0) first = SystemClock.elapsedRealtime() - t0
