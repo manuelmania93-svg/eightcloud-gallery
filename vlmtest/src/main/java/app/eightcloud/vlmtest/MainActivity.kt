@@ -79,6 +79,22 @@ class MainActivity : Activity() {
     @Volatile private var activeConv: com.google.ai.edge.litertlm.Conversation? = null
 
     @Volatile private var engineUsed = false
+
+    private val resultsFile get() = File(filesDir, "results_keep.txt")
+    private val restartMarker get() = File(filesDir, "restart_reason.txt")
+
+    private fun availMb(): Long = ActivityManager.MemoryInfo().also { (getSystemService(ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(it) }.availMem / 1_000_000
+
+    /** Frees ALL native memory for real by restarting the process. Log and results are on disk and shown again after the restart. */
+    private fun restartProcess(reason: String) {
+        rec("RESTARTING APP to free native memory: $reason (log and results are kept)")
+        runCatching { restartMarker.writeText(reason) }
+        val i = packageManager.getLaunchIntentForPackage(packageName)!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        android.os.Handler(mainLooper).postDelayed({
+            startActivity(i)
+            android.os.Handler(mainLooper).postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 400)
+        }, 700)
+    }
     @Volatile private var actionName = ""
     @Volatile private var actionStart = 0L
     @Volatile private var actionStep = ""
@@ -182,7 +198,7 @@ class MainActivity : Activity() {
         btn("Delete selected model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }; exclusive("delete") { closeEngineSafely(); modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName. Free storage ${freeMb()} MB.") } }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
-        btn("Stop") { Dl.cancel = true; runCatching { activeConv?.cancelProcess() }; if (busy.get()) { job?.cancel(); say("Stop: lock for '$actionName' cleared. If the model was mid-native-call, the engine is dropped (not closed) to avoid a crash; load it again. If it hangs, force-close the app."); engine = null; visionLoaded = false; activeConv = null; busy.set(false); actionName = ""; actionStart = -1L }; getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); say("stopped") }
+        btn("Stop") { Dl.cancel = true; runCatching { activeConv?.cancelProcess() }; getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); if (busy.get() || engine != null) { job?.cancel(); say("Stop: restarting the app to free the model memory for real."); restartProcess("Stop pressed during '$actionName'") } else say("stopped") }
         statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
         root.addView(statusView, 0)
         log = TextView(this).apply { textSize = 12f; setTextIsSelectable(true) }
@@ -255,6 +271,11 @@ class MainActivity : Activity() {
 
     private fun showPrevious() {
         runCatching {
+            val restarted = restartMarker.exists()
+            val keptResults = if (restarted && resultsFile.exists()) resultsFile.readText() else ""
+            runCatching { resultsFile.delete() }
+            if (restarted) { rec("=== APP WAS RESTARTED: ${restartMarker.readText()} ==="); restartMarker.delete() }
+            if (keptResults.isNotEmpty()) { results.append(keptResults); runCatching { resultsFile.writeText(keptResults) } }
             // keep the previous run's log, then start a fresh one
             if (liveLog.exists()) { liveLog.copyTo(prevLog, overwrite = true); liveLog.delete() }
             Thread.setDefaultUncaughtExceptionHandler { t, e ->
@@ -263,7 +284,7 @@ class MainActivity : Activity() {
             }
             if (crashFile.exists()) { rec("--- PREVIOUS JAVA CRASH ---\n" + crashFile.readText()); crashFile.delete() }
             if (prevLog.exists()) {
-                val lines = prevLog.readLines().takeLast(25)
+                val lines = prevLog.readLines().takeLast(if (restarted) 120 else 25)
                 rec("--- LAST ${lines.size} LOG LINES OF PREVIOUS RUN ---")
                 lines.forEach { rec(it.take(300)) }
             }
@@ -300,6 +321,7 @@ class MainActivity : Activity() {
 
     private fun rec(s: String) {
         results.append(s).append('\n')
+        runCatching { resultsFile.appendText(s + "\n") }
         say(s)
     }
 
@@ -356,6 +378,8 @@ class MainActivity : Activity() {
     @Volatile private var visionLoaded = false
 
     private fun load(gpu: Boolean) {
+        if (gpu && cur.freshEngine) { say("GPU is not supported for ${cur.label} on this phone (model card: Android GPU only verified on one Galaxy S26, 54-93 s init, 3-4 GB). Use 2a (CPU)."); return }
+        if (availMb() < 3000L) { say("Only ${availMb()} MB RAM available (need about 3000 MB). Not loading. Close other apps or restart this app."); return }
         if (!modelFile.exists() || modelFile.length() != modelBytes) { say("Model missing or incomplete (${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB of ${modelBytes / 1_000_000} MB)."); return }
         if (!isVerified()) { say("Model not SHA-256 verified yet. Press 1c first."); return }
         exclusive("load ${if (gpu) "GPU" else "CPU"}") { loadEngine(gpu, vision = false, smoke = true) }
@@ -373,7 +397,7 @@ class MainActivity : Activity() {
         if (!quiet) rec("--- LOAD $backendName vision=${if (vision) "on" else "off"} --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
         val t0 = SystemClock.elapsedRealtime()
         withContext(Dispatchers.Default) {
-            val visionOptions: List<Backend?> = if (vision) listOf(Backend.GPU(), Backend.CPU()) else listOf(null)
+            val visionOptions: List<Backend?> = if (vision) (if (cur.freshEngine) listOf(Backend.CPU()) else listOf(Backend.GPU(), Backend.CPU())) else listOf(null)
             for (vb in visionOptions) {
                 val ok = runCatching {
                     val cfg = EngineConfig(
@@ -391,6 +415,7 @@ class MainActivity : Activity() {
                 if (ok) break
             }
         }
+        if (engine == null && !quiet) { restartProcess("load failed, engine memory may be stuck in this process"); return }
         if (engine != null) {
             if (!quiet) rec("loaded in ${(SystemClock.elapsedRealtime() - t0) / 1000.0} s, PSS ${pssMb()} MB")
             if (smoke) {
@@ -623,6 +648,7 @@ class MainActivity : Activity() {
         if (photos.isEmpty()) { say("Pick photos first (button 3)."); return }
         exclusive("benchmark") {
             if (!ensureVision()) { rec("Benchmark aborted: vision engine could not be loaded."); return@exclusive }
+            if (cur.freshEngine) rec("NOTE: ${cur.label} needs a fresh engine per photo, about 25 s each, so about ${photos.size * 25 / 60 + 1} min for ${photos.size} photos.")
             rec("--- BENCHMARK $backendName n=${photos.size} --- temp ${tempC()}C battery ${battery()}%")
             val totals = mutableListOf<Long>()
             val firsts = mutableListOf<Long>()
