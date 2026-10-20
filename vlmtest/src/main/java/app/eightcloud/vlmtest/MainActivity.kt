@@ -78,9 +78,22 @@ class MainActivity : Activity() {
     private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var activeConv: com.google.ai.edge.litertlm.Conversation? = null
 
-    private fun exclusive(block: suspend () -> Unit) {
-        if (!busy.compareAndSet(false, true)) { say("Busy: another model action is still running. Wait for its result line, or press Stop."); return }
-        job = scope.launch { try { block() } finally { busy.set(false) } }
+    @Volatile private var actionName = ""
+    @Volatile private var actionStart = 0L
+    @Volatile private var actionStep = ""
+
+    private fun exclusive(name: String = "model action", block: suspend () -> Unit) {
+        if (!busy.compareAndSet(false, true)) {
+            say("Busy: '$actionName' has been running for ${(SystemClock.elapsedRealtime() - actionStart) / 1000} s. Step: ${actionStep.ifBlank { "-" }}. Wait for its result line, or press Stop (clears this lock).")
+            return
+        }
+        val myStart = SystemClock.elapsedRealtime(); actionName = name; actionStart = myStart; actionStep = "starting"
+        job = scope.launch {
+            try { block() }
+            catch (t: kotlinx.coroutines.CancellationException) { rec("'$name' cancelled.") }
+            catch (t: Throwable) { rec("'$name' FAILED: ${t.javaClass.simpleName}: ${t.message}") }
+            finally { if (actionStart == myStart) { busy.set(false); actionName = ""; actionStep = "" } }
+        }
     }
 
     /** Stops generation, waits, then closes the engine and waits again so native threads can finish. */
@@ -144,7 +157,7 @@ class MainActivity : Activity() {
         btn("0. Select next model (A Gemma / B Qwen3.5 / C Huihui)") {
             if (Dl.busy.get()) { say("Download in progress. Press Stop first."); return@btn }
             if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }
-            exclusive { closeEngineSafely() }
+            exclusive("unload") { closeEngineSafely() }
             modelIdx = (modelIdx + 1) % catalog.size
             getSharedPreferences("sel", Context.MODE_PRIVATE).edit().putInt("idx", modelIdx).apply()
             say("Selected ${cur.label} (${cur.note}). ${modelBytes / 1_000_000} MB. On disk: ${if (modelFile.exists()) modelFile.length() / 1_000_000 else 0} MB. Verified: ${isVerified()}. Free storage: ${freeMb()} MB. Engine unloaded.")
@@ -152,7 +165,7 @@ class MainActivity : Activity() {
         btn("1d. Delete selected model and download it again") {
             if (Dl.busy.get()) { say("Press Stop first, wait for it to stop."); return@btn }
             if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }
-            exclusive { closeEngineSafely(); modelFile.delete(); verifiedMarker.delete(); say("Deleted ${cur.label}. Free storage now ${freeMb()} MB. Starting download."); download() }
+            exclusive("delete+redownload") { closeEngineSafely(); modelFile.delete(); verifiedMarker.delete(); say("Deleted ${cur.label}. Free storage now ${freeMb()} MB. Starting download."); download() }
         }
         btn("1c. Verify model SHA-256 (required before load)") { verify() }
         btn("1b. Move old model to internal storage (no re-download)") { moveOld() }
@@ -165,10 +178,10 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        btn("Delete selected model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }; exclusive { closeEngineSafely(); modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName. Free storage ${freeMb()} MB.") } }
+        btn("Delete selected model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }; exclusive("delete") { closeEngineSafely(); modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName. Free storage ${freeMb()} MB.") } }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
-        btn("Stop") { Dl.cancel = true; runCatching { activeConv?.cancelProcess() }; getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); say("stopped") }
+        btn("Stop") { Dl.cancel = true; runCatching { activeConv?.cancelProcess() }; if (busy.get()) { job?.cancel(); say("Stop: lock for '$actionName' cleared. If the model was mid-native-call, the engine is dropped (not closed) to avoid a crash; load it again. If it hangs, force-close the app."); engine = null; visionLoaded = false; activeConv = null; busy.set(false); actionName = ""; actionStart = -1L }; getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); say("stopped") }
         statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
         root.addView(statusView, 0)
         log = TextView(this).apply { textSize = 12f; setTextIsSelectable(true) }
@@ -344,7 +357,7 @@ class MainActivity : Activity() {
     private fun load(gpu: Boolean) {
         if (!modelFile.exists() || modelFile.length() != modelBytes) { say("Model missing or incomplete (${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB of ${modelBytes / 1_000_000} MB)."); return }
         if (!isVerified()) { say("Model not SHA-256 verified yet. Press 1c first."); return }
-        exclusive { loadEngine(gpu, vision = false, smoke = true) }
+        exclusive("load ${if (gpu) "GPU" else "CPU"}") { loadEngine(gpu, vision = false, smoke = true) }
     }
 
     /** Loads the engine. vision=true also loads the vision encoder (GPU first as in Gallery, CPU if that fails). */
@@ -474,9 +487,11 @@ class MainActivity : Activity() {
     /** Qwen3.5 keeps recurrent state across conversations on one Engine (model card note), so use a fresh Engine per request. */
     private suspend fun freshIfNeeded() {
         if (!cur.freshEngine || engine == null) return
+        actionStep = "building fresh engine"
         val gpu = loadedGpu; val vis = wantVision
         val t0 = SystemClock.elapsedRealtime()
         loadEngine(gpu, vis, false, quiet = true)
+        actionStep = "generating"
         say("(fresh engine for this request: ${SystemClock.elapsedRealtime() - t0} ms)")
     }
 
@@ -602,12 +617,14 @@ class MainActivity : Activity() {
 
     private fun benchmark() {
         if (photos.isEmpty()) { say("Pick photos first (button 3)."); return }
-        exclusive {
+        exclusive("benchmark") {
             if (!ensureVision()) { rec("Benchmark aborted: vision engine could not be loaded."); return@exclusive }
             rec("--- BENCHMARK $backendName n=${photos.size} --- temp ${tempC()}C battery ${battery()}%")
             val totals = mutableListOf<Long>()
             val firsts = mutableListOf<Long>()
             for ((i, f) in photos.withIndex()) {
+                actionStep = "photo ${i + 1} of ${photos.size}"
+                say("... photo ${i + 1}/${photos.size} started (${if (cur.freshEngine) "fresh engine first, about 20 s" else "running"})")
                 val r = withContext(Dispatchers.Default) { runCatching { runOne(f, prompt) } }
                 r.onSuccess { (txt, first, total) ->
                     totals += total; firsts += first
@@ -628,7 +645,7 @@ class MainActivity : Activity() {
         if (withPhoto && f == null) { say("No photo picked. Press 3 first."); return }
         val q = question.text.toString().ifBlank { if (f != null) "Describe this photo." else "Say hi in three words." }
         say("ASK started (${if (f != null) "with photo" else "text only"}, engine $backendName): $q")
-        exclusive {
+        exclusive("ask") {
             if (f != null && !ensureVision()) { rec("ASK aborted: vision engine could not be loaded."); return@exclusive }
             val r = withContext(Dispatchers.Default) { runCatching { if (f != null) runOne(f, q) else runText(q) } }
             r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${stripThink(txt).replace("\n", " ")}") }
