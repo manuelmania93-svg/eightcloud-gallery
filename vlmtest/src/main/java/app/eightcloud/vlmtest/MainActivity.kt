@@ -126,6 +126,8 @@ class MainActivity : Activity() {
         visionLoaded = false
     }
     private var panel: ScrollView? = null
+    private lateinit var answerView: TextView
+    private lateinit var answerScroll: ScrollView
     @Volatile private var wantVision = false
     private val cur get() = catalog[modelIdx]
     private val modelName get() = cur.file
@@ -201,7 +203,7 @@ class MainActivity : Activity() {
         btn("Stop") { Dl.cancel = true; runCatching { activeConv?.cancelProcess() }; getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); if (busy.get() || engine != null) { job?.cancel(); say("Stop: restarting the app to free the model memory for real."); restartProcess("Stop pressed during '$actionName'") } else say("stopped") }
         statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
         root.addView(statusView, 0)
-        log = TextView(this).apply { textSize = 12f; setTextIsSelectable(true) }
+        log = TextView(this).apply { textSize = 12f; setTextColor(0xFF222222.toInt()); setTextIsSelectable(true) }
         scroll = ScrollView(this).apply {
             addView(log)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -214,6 +216,13 @@ class MainActivity : Activity() {
             addView(buttons)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f)
         }.also { panel = it })
+        answerView = TextView(this).apply { textSize = 18f; setTextColor(0xFF000000.toInt()); setBackgroundColor(0xFFFFFFE0.toInt()); setPadding(12, 8, 12, 8); setTextIsSelectable(true); text = "AI answers appear here (big text, you can select and copy).\n" }
+        answerScroll = ScrollView(this).apply {
+            addView(answerView)
+            setBackgroundColor(0xFFFFFFE0.toInt())
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.2f)
+        }
+        root.addView(answerScroll)
         root.addView(scroll)
         // Input at the bottom: its own full-width row, then two short buttons. Always visible, keyboard-safe (adjustResize).
         root.addView(question)
@@ -316,6 +325,13 @@ class MainActivity : Activity() {
         runOnUiThread {
             log.append(s + "\n")
             scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
+        }
+    }
+
+    private fun answer(s: String) {
+        runOnUiThread {
+            answerView.append(s + "\n\n")
+            answerScroll.post { answerScroll.fullScroll(ScrollView.FOCUS_DOWN) }
         }
     }
 
@@ -659,6 +675,7 @@ class MainActivity : Activity() {
                 r.onSuccess { (txt, first, total) ->
                     totals += total; firsts += first
                     rec("#$i first=${first}ms total=${total}ms temp=${tempC()}C :: ${judge(txt).replace("\n", " | ")}")
+                    answer("#${i + 1}  (${total / 1000.0} s)\n${judge(txt)}")
                 }.onFailure { rec("#$i ERROR ${it.javaClass.simpleName}: ${it.message}") }
             }
             if (totals.isNotEmpty()) {
@@ -678,7 +695,7 @@ class MainActivity : Activity() {
         exclusive("ask") {
             if (f != null && !ensureVision()) { rec("ASK aborted: vision engine could not be loaded."); return@exclusive }
             val r = withContext(Dispatchers.Default) { runCatching { if (f != null) runOne(f, q) else runText(q) } }
-            r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${stripThink(txt).replace("\n", " ")}") }
+            r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${stripThink(txt).replace("\n", " ")}"); answer("Q: $q\nA (${total / 1000.0} s): ${stripThink(txt)}") }
                 .onFailure { rec("ASK ERROR ${it.javaClass.simpleName}: ${it.message}") }
         }
     }

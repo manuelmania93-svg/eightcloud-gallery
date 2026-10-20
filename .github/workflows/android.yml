@@ -52,7 +52,7 @@ jobs:
             adb shell am start -n app.eightcloud.vlmtest/app.eightcloud.vlmtest.MainActivity || adb shell monkey -p app.eightcloud.vlmtest 1
             sleep 8
             adb exec-out screencap -p > shot1.png
-            adb shell input tap 540 2230
+            adb shell input tap 540 1450
             sleep 3
             adb exec-out screencap -p > shot2.png
       - uses: actions/upload-artifact@v4
