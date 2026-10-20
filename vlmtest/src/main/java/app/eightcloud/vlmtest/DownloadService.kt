@@ -49,46 +49,65 @@ class DownloadService : Service() {
         Thread {
             val f = File(filesDir, name)
             val marker = File(filesDir, "$name.verified")
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            val wl = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "vlmtest:dl")
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            @Suppress("DEPRECATION")
+            val wfl = wm.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "vlmtest:dl")
+            wl.acquire(60 * 60 * 1000L)
+            wfl.acquire()
             try {
-                if (f.exists() && f.length() > total) { Dl.messages.add("File was larger than expected (${f.length()}). Deleted, starting over."); f.delete(); marker.delete() }
-                var have = if (f.exists()) f.length() else 0L
-                if (have == total) { Dl.messages.add("Model already complete. Press 1c."); return@Thread }
-                val c = URL(url).openConnection() as HttpURLConnection
-                c.instanceFollowRedirects = true
-                if (have > 0) c.setRequestProperty("Range", "bytes=$have-")
-                c.connectTimeout = 20000
-                c.readTimeout = 30000
-                val code = c.responseCode
-                if (code != 200 && code != 206) { Dl.messages.add("HTTP $code"); return@Thread }
-                if (code == 200 && have > 0) { Dl.messages.add("Server ignored Range (HTTP 200). Restarting from 0."); f.delete(); have = 0 }
-                marker.delete()
-                Dl.messages.add("Downloading from ${have / 1_000_000} MB (HTTP $code) ...")
-                var lastN = 0L
-                c.inputStream.use { input ->
-                    java.io.FileOutputStream(f, have > 0).use { out ->
-                        val buf = ByteArray(1 shl 16)
-                        while (have < total && !Dl.cancel) {
-                            val n = input.read(buf, 0, minOf(buf.size.toLong(), total - have).toInt())
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            have += n
-                            val now = System.currentTimeMillis()
-                            if (now - lastN > 2000) {
-                                lastN = now
-                                nm.notify(1, notif("${have / 1_000_000} / ${total / 1_000_000} MB (${have * 100 / total}%)", have, total))
+                var attempt = 0
+                while (attempt < 30 && !Dl.cancel) {
+                    attempt++
+                    if (f.exists() && f.length() > total) { Dl.messages.add("File was larger than expected (${f.length()}). Deleted, starting over."); f.delete(); marker.delete() }
+                    var have = if (f.exists()) f.length() else 0L
+                    if (have == total) break
+                    try {
+                        val c = URL(url).openConnection() as HttpURLConnection
+                        c.instanceFollowRedirects = true
+                        if (have > 0) c.setRequestProperty("Range", "bytes=$have-")
+                        c.connectTimeout = 20000
+                        c.readTimeout = 30000
+                        val code = c.responseCode
+                        if (code != 200 && code != 206) { Dl.messages.add("HTTP $code"); break }
+                        if (code == 200 && have > 0) { Dl.messages.add("Server ignored Range (HTTP 200). Restarting from 0."); f.delete(); have = 0 }
+                        marker.delete()
+                        Dl.messages.add("Downloading from ${have / 1_000_000} MB (HTTP $code), attempt $attempt ...")
+                        var lastN = 0L
+                        c.inputStream.use { input ->
+                            java.io.FileOutputStream(f, have > 0).use { out ->
+                                val buf = ByteArray(1 shl 16)
+                                while (have < total && !Dl.cancel) {
+                                    val n = input.read(buf, 0, minOf(buf.size.toLong(), total - have).toInt())
+                                    if (n < 0) break
+                                    out.write(buf, 0, n)
+                                    have += n
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastN > 2000) {
+                                        lastN = now
+                                        nm.notify(1, notif("${have / 1_000_000} / ${total / 1_000_000} MB (${have * 100 / total}%)", have, total))
+                                    }
+                                }
+                                out.fd.sync()
                             }
                         }
-                        out.fd.sync()
+                    } catch (t: Throwable) {
+                        Dl.messages.add("Network error: ${t.message}. Retrying in 5 s (attempt $attempt of 30).")
+                        Thread.sleep(5000)
                     }
                 }
+                val size = if (f.exists()) f.length() else 0L
                 Dl.messages.add(
-                    if (Dl.cancel) "Stopped at ${f.length()} bytes. Press 1 to resume."
-                    else if (f.length() == total) "Download complete, size matches (${f.length()} bytes). Press 1c to verify."
-                    else "Incomplete: ${f.length()} of $total. Press 1 to resume."
+                    if (size == total) "Download complete, size matches ($size bytes). Press 1c to verify."
+                    else if (Dl.cancel) "Stopped at $size bytes. Press 1 to resume."
+                    else "Incomplete: $size of $total. Press 1 to resume."
                 )
             } catch (t: Throwable) {
                 Dl.messages.add("Download error: ${t.message}. Press 1 to resume.")
             } finally {
+                runCatching { if (wl.isHeld) wl.release() }
+                runCatching { if (wfl.isHeld) wfl.release() }
                 Dl.busy.set(false)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()

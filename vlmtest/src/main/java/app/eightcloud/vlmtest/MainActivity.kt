@@ -85,6 +85,11 @@ class MainActivity : Activity() {
             root.addView(Button(this).apply { this.text = text; setOnClickListener { onClick() } })
         }
         btn("1. Download model (Wi-Fi only, 2.6 GB)") { download() }
+        btn("1a. Allow background (disable battery optimization)") {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            if (pm.isIgnoringBatteryOptimizations(packageName)) say("Battery optimization already disabled for this app.")
+            else startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+        }
         btn("0. Switch model file (generic 2.6 GB / GPU variant 2.0 GB)") {
             useGpuVariant = !useGpuVariant
             say("Model file now: $modelName (${modelBytes / 1_000_000} MB). On disk: ${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB. Verified: ${isVerified()}")
@@ -148,8 +153,10 @@ class MainActivity : Activity() {
             size == 0L -> "NOT DOWNLOADED"
             else -> "INCOMPLETE (press 1 to resume)"
         }
+        val pmx = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val hint = if (!pmx.isIgnoringBatteryOptimizations(packageName)) "\nHint: press 1a and allow, so the download survives leaving the app. Also set battery to Unrestricted in system app settings." else ""
         val eng = if (engine != null) " | engine loaded ($backendName)" else ""
-        statusView.text = "$modelName\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng"
+        statusView.text = "$modelName\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$hint"
     }
 
     private fun say(s: String) {
