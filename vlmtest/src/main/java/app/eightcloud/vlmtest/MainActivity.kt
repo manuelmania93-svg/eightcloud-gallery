@@ -78,6 +78,7 @@ class MainActivity : Activity() {
     private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var activeConv: com.google.ai.edge.litertlm.Conversation? = null
 
+    @Volatile private var engineUsed = false
     @Volatile private var actionName = ""
     @Volatile private var actionStart = 0L
     @Volatile private var actionStep = ""
@@ -368,6 +369,7 @@ class MainActivity : Activity() {
         backendName = if (gpu) "GPU" else "CPU"
         loadedGpu = gpu
         wantVision = vision
+        engineUsed = false
         if (!quiet) rec("--- LOAD $backendName vision=${if (vision) "on" else "off"} --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
         val t0 = SystemClock.elapsedRealtime()
         withContext(Dispatchers.Default) {
@@ -406,7 +408,7 @@ class MainActivity : Activity() {
         if (engine == null && wantVision) rec("(engine was missing although vision was wanted: a previous load failed or was closed)")
         if (!modelFile.exists() || modelFile.length() != modelBytes || !isVerified()) { rec("Model missing or not verified. Download and verify first."); return false }
         rec("Vision encoder not loaded (engine=${engine != null}, visionLoaded=$visionLoaded, wantVision=$wantVision). Reloading ${if (engine != null) backendName else "CPU"} engine with vision (automatic).")
-        loadEngine(if (engine != null) loadedGpu else false, vision = true, smoke = false)
+        loadEngine(if (engine != null) loadedGpu else false, vision = true, smoke = true)
         return engine != null && visionLoaded
     }
 
@@ -486,7 +488,7 @@ class MainActivity : Activity() {
 
     /** Qwen3.5 keeps recurrent state across conversations on one Engine (model card note), so use a fresh Engine per request. */
     private suspend fun freshIfNeeded() {
-        if (!cur.freshEngine || engine == null) return
+        if (!cur.freshEngine || engine == null || !engineUsed) return
         actionStep = "building fresh engine"
         val gpu = loadedGpu; val vis = wantVision
         val t0 = SystemClock.elapsedRealtime()
@@ -525,6 +527,7 @@ class MainActivity : Activity() {
                 }
             } finally { activeConv = null }
         }
+        engineUsed = true
         kotlinx.coroutines.delay(300)
         return Triple(sb.toString().trim(), first, SystemClock.elapsedRealtime() - t0)
     }
@@ -611,6 +614,7 @@ class MainActivity : Activity() {
                     }
             } finally { activeConv = null }
         }
+        engineUsed = true
         kotlinx.coroutines.delay(300)
         return Triple(sb.toString().trim(), first, SystemClock.elapsedRealtime() - t0)
     }
