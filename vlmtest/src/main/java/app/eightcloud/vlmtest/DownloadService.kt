@@ -37,13 +37,24 @@ class DownloadService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(NotificationChannel("dl", "Model download", NotificationManager.IMPORTANCE_LOW))
-        val name = intent?.getStringExtra("name") ?: return START_NOT_STICKY.also { stopSelf() }
-        val url = intent.getStringExtra("url") ?: return START_NOT_STICKY.also { stopSelf() }
-        val total = intent.getLongExtra("bytes", 0L)
-        startForeground(1, notif("Starting", 0, total), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        val prefs = getSharedPreferences("dl", Context.MODE_PRIVATE)
+        if (intent?.getStringExtra("name") != null) {
+            prefs.edit().putString("name", intent.getStringExtra("name")).putString("url", intent.getStringExtra("url"))
+                .putLong("bytes", intent.getLongExtra("bytes", 0L)).apply()
+        }
+        // After a system restart the intent is null: resume from the saved request.
+        val name = prefs.getString("name", null) ?: return START_NOT_STICKY.also { stopSelf() }
+        val url = prefs.getString("url", null) ?: return START_NOT_STICKY.also { stopSelf() }
+        val total = prefs.getLong("bytes", 0L)
+        if (total <= 0L) return START_NOT_STICKY.also { stopSelf() }
+        val started = runCatching {
+            startForeground(1, notif("Starting", 0, total), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        }.isSuccess
+        if (!started) { Dl.messages.add("Background restart not allowed by Android. Open the app to resume."); stopSelf(); return START_NOT_STICKY }
+        if (intent == null) Dl.messages.add("Resuming download after the app was killed.")
         if (!Dl.busy.compareAndSet(false, true)) {
             Dl.messages.add("A download is already running. Ignoring this press.")
-            return START_NOT_STICKY
+            return START_STICKY
         }
         Dl.cancel = false
         Thread {
@@ -98,6 +109,7 @@ class DownloadService : Service() {
                     }
                 }
                 val size = if (f.exists()) f.length() else 0L
+                if (size == total || Dl.cancel) prefs.edit().clear().apply()
                 Dl.messages.add(
                     if (size == total) "Download complete, size matches ($size bytes). Press 1c to verify."
                     else if (Dl.cancel) "Stopped at $size bytes. Press 1 to resume."
@@ -113,6 +125,6 @@ class DownloadService : Service() {
                 stopSelf()
             }
         }.start()
-        return START_NOT_STICKY
+        return START_STICKY
     }
 }

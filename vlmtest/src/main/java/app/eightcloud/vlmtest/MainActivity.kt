@@ -112,7 +112,7 @@ class MainActivity : Activity() {
         btn("Delete current model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName.") }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
-        btn("Stop") { Dl.cancel = true; job?.cancel(); say("stopped") }
+        btn("Stop") { Dl.cancel = true; job?.cancel(); getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); say("stopped") }
         statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
         root.addView(statusView, 0)
         log = TextView(this).apply { textSize = 12f; setTextIsSelectable(true) }
@@ -137,6 +137,7 @@ class MainActivity : Activity() {
             while (true) { refreshStatus(); kotlinx.coroutines.delay(1000) }
         }
         showPrevious()
+        autoResume()
         say("Device: ${android.os.Build.MODEL} (${android.os.Build.HARDWARE}), RAM " +
             "${(getSystemService(ACTIVITY_SERVICE) as ActivityManager).let { am ->
                 ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem / 1_000_000
@@ -246,6 +247,20 @@ class MainActivity : Activity() {
     }
 
     private fun pssMb(): Long = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }.totalPss / 1024L
+
+    /** If a download was requested and is not finished (app was killed), resume it now. */
+    private fun autoResume() {
+        val prefs = getSharedPreferences("dl", Context.MODE_PRIVATE)
+        val name = prefs.getString("name", null) ?: return
+        val bytes = prefs.getLong("bytes", 0L)
+        val f = File(filesDir, name)
+        if (bytes <= 0L || (f.exists() && f.length() == bytes)) { prefs.edit().clear().apply(); return }
+        if (Dl.busy.get()) return
+        if (!onWifi()) { say("Unfinished download of $name (${(if (f.exists()) f.length() else 0L) / 1_000_000} of ${bytes / 1_000_000} MB). Not on unmetered Wi-Fi, not resuming."); return }
+        say("Unfinished download of $name found. Resuming automatically.")
+        runCatching { startForegroundService(Intent(this, DownloadService::class.java)) }
+            .onFailure { say("Could not resume: ${it.message}. Press 1.") }
+    }
 
     private fun download() {
         if (!onWifi()) { say("Not on unmetered Wi-Fi. Download refused."); return }
