@@ -74,6 +74,27 @@ class MainActivity : Activity() {
             5_247_716_576L, "ebd54bad60896b14acd717a12e0bf6b1020eb69a7c73d9de17a14ee18cf6087e", false, "community abliterated, Apache-2.0, unaudited")
     )
     private var modelIdx = 0
+    /** One engine action at a time. Overlapping load/ask/close calls on the native engine crashed v0.1.16 (SIGSEGV). */
+    private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var activeConv: com.google.ai.edge.litertlm.Conversation? = null
+
+    private fun exclusive(block: suspend () -> Unit) {
+        if (!busy.compareAndSet(false, true)) { say("Busy: another model action is still running. Wait for its result line, or press Stop."); return }
+        job = scope.launch { try { block() } finally { busy.set(false) } }
+    }
+
+    /** Stops generation, waits, then closes the engine and waits again so native threads can finish. */
+    private suspend fun closeEngineSafely() {
+        val e = engine ?: return
+        withContext(Dispatchers.Default) {
+            runCatching { activeConv?.cancelProcess() }
+            kotlinx.coroutines.delay(500)
+            runCatching { e.close() }
+            kotlinx.coroutines.delay(800)
+        }
+        engine = null
+        visionLoaded = false
+    }
     private var panel: ScrollView? = null
     @Volatile private var wantVision = false
     private val cur get() = catalog[modelIdx]
@@ -122,17 +143,16 @@ class MainActivity : Activity() {
         }
         btn("0. Select next model (A Gemma / B Qwen3.5 / C Huihui)") {
             if (Dl.busy.get()) { say("Download in progress. Press Stop first."); return@btn }
-            engine?.let { runCatching { it.close() } }; engine = null; visionLoaded = false
+            if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }
+            exclusive { closeEngineSafely() }
             modelIdx = (modelIdx + 1) % catalog.size
             getSharedPreferences("sel", Context.MODE_PRIVATE).edit().putInt("idx", modelIdx).apply()
             say("Selected ${cur.label} (${cur.note}). ${modelBytes / 1_000_000} MB. On disk: ${if (modelFile.exists()) modelFile.length() / 1_000_000 else 0} MB. Verified: ${isVerified()}. Free storage: ${freeMb()} MB. Engine unloaded.")
         }
         btn("1d. Delete selected model and download it again") {
             if (Dl.busy.get()) { say("Press Stop first, wait for it to stop."); return@btn }
-            engine?.let { runCatching { it.close() } }; engine = null; visionLoaded = false
-            modelFile.delete(); verifiedMarker.delete()
-            say("Deleted ${cur.label}. Free storage now ${freeMb()} MB. Starting download.")
-            download()
+            if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }
+            exclusive { closeEngineSafely(); modelFile.delete(); verifiedMarker.delete(); say("Deleted ${cur.label}. Free storage now ${freeMb()} MB. Starting download."); download() }
         }
         btn("1c. Verify model SHA-256 (required before load)") { verify() }
         btn("1b. Move old model to internal storage (no re-download)") { moveOld() }
@@ -145,10 +165,10 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        btn("Delete selected model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; engine?.let { runCatching { it.close() } }; engine = null; visionLoaded = false; modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName. Free storage ${freeMb()} MB.") }
+        btn("Delete selected model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; if (busy.get()) { say("Busy: wait for the running model action to finish."); return@btn }; exclusive { closeEngineSafely(); modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName. Free storage ${freeMb()} MB.") } }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
-        btn("Stop") { Dl.cancel = true; job?.cancel(); getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); say("stopped") }
+        btn("Stop") { Dl.cancel = true; runCatching { activeConv?.cancelProcess() }; getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); say("stopped") }
         statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
         root.addView(statusView, 0)
         log = TextView(this).apply { textSize = 12f; setTextIsSelectable(true) }
@@ -324,13 +344,12 @@ class MainActivity : Activity() {
     private fun load(gpu: Boolean) {
         if (!modelFile.exists() || modelFile.length() != modelBytes) { say("Model missing or incomplete (${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB of ${modelBytes / 1_000_000} MB)."); return }
         if (!isVerified()) { say("Model not SHA-256 verified yet. Press 1c first."); return }
-        job?.cancel()
-        job = scope.launch { loadEngine(gpu, vision = false, smoke = true) }
+        exclusive { loadEngine(gpu, vision = false, smoke = true) }
     }
 
     /** Loads the engine. vision=true also loads the vision encoder (GPU first as in Gallery, CPU if that fails). */
     private suspend fun loadEngine(gpu: Boolean, vision: Boolean, smoke: Boolean, quiet: Boolean = false) {
-        runCatching { engine?.close() }
+        closeEngineSafely()
         engine = null
         visionLoaded = false
         backendName = if (gpu) "GPU" else "CPU"
@@ -428,8 +447,7 @@ class MainActivity : Activity() {
         val modelSha = this.modelSha
         val marker = verifiedMarker
         if (!f.exists()) { say("No model file."); return }
-        job?.cancel()
-        job = scope.launch {
+        scope.launch {
             withContext(Dispatchers.IO) {
                 runCatching {
                     say("Hashing $modelName (${f.length() / 1_000_000} MB) ...")
@@ -484,11 +502,15 @@ class MainActivity : Activity() {
         val t0 = SystemClock.elapsedRealtime()
         var first = -1L
         e.createConversation(sampler()).use { conv ->
-            conv.sendMessageAsync(Contents.of(Content.Text(text))).collect { chunk ->
-                if (first < 0) first = SystemClock.elapsedRealtime() - t0
-                sb.append(chunk.toString())
-            }
+            activeConv = conv
+            try {
+                conv.sendMessageAsync(Contents.of(Content.Text(text))).collect { chunk ->
+                    if (first < 0) first = SystemClock.elapsedRealtime() - t0
+                    sb.append(chunk.toString())
+                }
+            } finally { activeConv = null }
         }
+        kotlinx.coroutines.delay(300)
         return Triple(sb.toString().trim(), first, SystemClock.elapsedRealtime() - t0)
     }
 
@@ -496,8 +518,7 @@ class MainActivity : Activity() {
         val src = oldModelFile
         if (!src.exists()) { say("No old model on external storage."); return }
         if (modelFile.exists() && modelFile.length() == modelBytes) { say("Internal model already complete."); return }
-        job?.cancel()
-        job = scope.launch {
+        scope.launch {
             withContext(Dispatchers.IO) {
                 runCatching {
                     val free = filesDir.usableSpace
@@ -524,8 +545,7 @@ class MainActivity : Activity() {
     }
 
     private fun diagnostics() {
-        job?.cancel()
-        job = scope.launch {
+        scope.launch {
             withContext(Dispatchers.IO) {
                 rec("--- DIAGNOSTICS --- model=$modelName verified=${isVerified()}")
                 rec("internal free ${filesDir.usableSpace / 1_000_000} MB; model internal ${if (modelFile.exists()) modelFile.length() / 1_000_000 else -1} MB; model external ${if (oldModelFile.exists()) oldModelFile.length() / 1_000_000 else -1} MB")
@@ -567,20 +587,23 @@ class MainActivity : Activity() {
         val t0 = SystemClock.elapsedRealtime()
         var first = -1L
         e.createConversation(sampler()).use { conv ->
-            conv.sendMessageAsync(Contents.of(Content.ImageFile(file.absolutePath), Content.Text(text)))
-                .collect { chunk ->
-                    if (first < 0) first = SystemClock.elapsedRealtime() - t0
-                    sb.append(chunk.toString())
-                }
+            activeConv = conv
+            try {
+                conv.sendMessageAsync(Contents.of(Content.ImageFile(file.absolutePath), Content.Text(text)))
+                    .collect { chunk ->
+                        if (first < 0) first = SystemClock.elapsedRealtime() - t0
+                        sb.append(chunk.toString())
+                    }
+            } finally { activeConv = null }
         }
+        kotlinx.coroutines.delay(300)
         return Triple(sb.toString().trim(), first, SystemClock.elapsedRealtime() - t0)
     }
 
     private fun benchmark() {
         if (photos.isEmpty()) { say("Pick photos first (button 3)."); return }
-        job?.cancel()
-        job = scope.launch {
-            if (!ensureVision()) { rec("Benchmark aborted: vision engine could not be loaded."); return@launch }
+        exclusive {
+            if (!ensureVision()) { rec("Benchmark aborted: vision engine could not be loaded."); return@exclusive }
             rec("--- BENCHMARK $backendName n=${photos.size} --- temp ${tempC()}C battery ${battery()}%")
             val totals = mutableListOf<Long>()
             val firsts = mutableListOf<Long>()
@@ -605,8 +628,8 @@ class MainActivity : Activity() {
         if (withPhoto && f == null) { say("No photo picked. Press 3 first."); return }
         val q = question.text.toString().ifBlank { if (f != null) "Describe this photo." else "Say hi in three words." }
         say("ASK started (${if (f != null) "with photo" else "text only"}, engine $backendName): $q")
-        job = scope.launch {
-            if (f != null && !ensureVision()) { rec("ASK aborted: vision engine could not be loaded."); return@launch }
+        exclusive {
+            if (f != null && !ensureVision()) { rec("ASK aborted: vision engine could not be loaded."); return@exclusive }
             val r = withContext(Dispatchers.Default) { runCatching { if (f != null) runOne(f, q) else runText(q) } }
             r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${stripThink(txt).replace("\n", " ")}") }
                 .onFailure { rec("ASK ERROR ${it.javaClass.simpleName}: ${it.message}") }
