@@ -136,6 +136,7 @@ class MainActivity : Activity() {
         scope.launch {
             while (true) { refreshStatus(); kotlinx.coroutines.delay(1000) }
         }
+        showPrevious()
         say("Device: ${android.os.Build.MODEL} (${android.os.Build.HARDWARE}), RAM " +
             "${(getSystemService(ACTIVITY_SERVICE) as ActivityManager).let { am ->
                 ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem / 1_000_000
@@ -173,7 +174,49 @@ class MainActivity : Activity() {
         statusView.text = "ACTIVE FILE: ${if (useGpuVariant) "GPU variant" else "GENERIC"} - $modelName\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$hint"
     }
 
+    private val liveLog get() = File(filesDir, "livelog.txt")
+    private val prevLog get() = File(filesDir, "prevlog.txt")
+    private val crashFile get() = File(filesDir, "lastcrash.txt")
+
+    private fun showPrevious() {
+        runCatching {
+            // keep the previous run's log, then start a fresh one
+            if (liveLog.exists()) { liveLog.copyTo(prevLog, overwrite = true); liveLog.delete() }
+            Thread.setDefaultUncaughtExceptionHandler { t, e ->
+                runCatching { crashFile.writeText("Uncaught in ${t.name}: ${android.util.Log.getStackTraceString(e).take(4000)}") }
+                Runtime.getRuntime().halt(2)
+            }
+            if (crashFile.exists()) { rec("--- PREVIOUS JAVA CRASH ---\n" + crashFile.readText()); crashFile.delete() }
+            if (prevLog.exists()) {
+                val lines = prevLog.readLines().takeLast(25)
+                rec("--- LAST ${lines.size} LOG LINES OF PREVIOUS RUN ---")
+                lines.forEach { rec(it.take(300)) }
+            }
+            val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+            val exits = am.getHistoricalProcessExitReasons(packageName, 0, 3)
+            val names = mapOf(1 to "EXIT_SELF", 2 to "SIGNALED", 3 to "LOW_MEMORY", 4 to "CRASH", 5 to "CRASH_NATIVE", 6 to "ANR",
+                7 to "INITIALIZATION_FAILURE", 8 to "PERMISSION_CHANGE", 9 to "EXCESSIVE_RESOURCE_USAGE", 10 to "USER_REQUESTED",
+                11 to "USER_STOPPED", 12 to "DEPENDENCY_DIED", 13 to "OTHER", 14 to "FREEZER", 15 to "PACKAGE_STATE_CHANGE", 16 to "PACKAGE_UPDATED")
+            rec("--- EXIT REASONS (newest first) ---")
+            for (x in exits) {
+                rec("${java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(x.timestamp))} reason=${names[x.reason] ?: x.reason} status=${x.status} pss=${x.pss / 1024}MB rss=${x.rss / 1024}MB importance=${x.importance} desc=${x.description}")
+                if (x.reason == 5) {
+                    runCatching {
+                        val bytes = x.traceInputStream?.use { it.readBytes() } ?: ByteArray(0)
+                        val txt = String(bytes, Charsets.ISO_8859_1)
+                        val strs = Regex("[ -~]{6,}").findAll(txt).map { it.value }.filter { w ->
+                            Regex("signal|SIG|abort|Abort|backtrace|\\.so|lib|fault|#\\d+|pc ", RegexOption.IGNORE_CASE).containsMatchIn(w)
+                        }.take(40).toList()
+                        rec("  native trace (${bytes.size} bytes, readable lines):")
+                        strs.forEach { rec("  " + it.take(200)) }
+                    }.onFailure { rec("  trace unavailable: ${it.message}") }
+                }
+            }
+        }.onFailure { rec("previous-run info error: ${it.javaClass.simpleName}: ${it.message}") }
+    }
+
     private fun say(s: String) {
+        runCatching { liveLog.appendText(s + "\n") }
         runOnUiThread {
             log.append(s + "\n")
             scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
