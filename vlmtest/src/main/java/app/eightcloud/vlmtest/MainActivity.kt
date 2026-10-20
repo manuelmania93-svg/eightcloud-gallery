@@ -74,6 +74,8 @@ class MainActivity : Activity() {
             5_247_716_576L, "ebd54bad60896b14acd717a12e0bf6b1020eb69a7c73d9de17a14ee18cf6087e", false, "community abliterated, Apache-2.0, unaudited")
     )
     private var modelIdx = 0
+    private var panel: ScrollView? = null
+    @Volatile private var wantVision = false
     private val cur get() = catalog[modelIdx]
     private val modelName get() = cur.file
     private val modelUrl get() = cur.url
@@ -97,8 +99,20 @@ class MainActivity : Activity() {
             setPadding(24, 48, 24, 24)
         }
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var row: LinearLayout? = null
+        var inRow = 0
         fun btn(text: String, onClick: () -> Unit) {
-            buttons.addView(Button(this).apply { this.text = text; textSize = 13f; minHeight = 0; minimumHeight = 0; setPadding(8, 4, 8, 4); setOnClickListener { onClick() } })
+            if (row == null || inRow == 2) {
+                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                buttons.addView(row)
+                inRow = 0
+            }
+            inRow++
+            row!!.addView(Button(this).apply {
+                this.text = text; textSize = 11f; isAllCaps = false; minHeight = 0; minimumHeight = 0; setPadding(6, 2, 6, 2)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { onClick() }
+            })
         }
         btn("1. Download / resume selected model (Wi-Fi only)") { download() }
         btn("1a. Allow background (disable battery optimization)") {
@@ -129,7 +143,7 @@ class MainActivity : Activity() {
         question = EditText(this).apply {
             hint = "Question (5 = text only, no photo / 5b = about the last picked photo)"
             inputType = InputType.TYPE_CLASS_TEXT
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         btn("Delete selected model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; engine?.let { runCatching { it.close() } }; engine = null; visionLoaded = false; modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName. Free storage ${freeMb()} MB.") }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
@@ -142,17 +156,21 @@ class MainActivity : Activity() {
             addView(log)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         }
+        root.addView(Button(this).apply {
+            text = "Hide / show buttons"; textSize = 11f; isAllCaps = false; minHeight = 0; minimumHeight = 0; setPadding(6, 2, 6, 2)
+            setOnClickListener { panel?.let { it.visibility = if (it.visibility == android.view.View.VISIBLE) android.view.View.GONE else android.view.View.VISIBLE } }
+        })
         root.addView(ScrollView(this).apply {
             addView(buttons)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 3f)
-        })
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f)
+        }.also { panel = it })
         root.addView(scroll)
-        // Input bar at the bottom, always visible above the keyboard (adjustResize).
+        // Input at the bottom: its own full-width row, then two short buttons. Always visible, keyboard-safe (adjustResize).
+        root.addView(question)
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(question)
-            addView(Button(this@MainActivity).apply { text = "5. Ask text only"; setOnClickListener { ask(false) } })
-            addView(Button(this@MainActivity).apply { text = "5b. Ask about last photo"; setOnClickListener { ask(true) } })
+            addView(Button(this@MainActivity).apply { text = "5. Ask text only"; textSize = 12f; isAllCaps = false; layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f); setOnClickListener { ask(false) } })
+            addView(Button(this@MainActivity).apply { text = "5b. Ask last photo"; textSize = 12f; isAllCaps = false; layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f); setOnClickListener { ask(true) } })
         })
         setContentView(root)
         scope.launch {
@@ -317,6 +335,7 @@ class MainActivity : Activity() {
         visionLoaded = false
         backendName = if (gpu) "GPU" else "CPU"
         loadedGpu = gpu
+        wantVision = vision
         if (!quiet) rec("--- LOAD $backendName vision=${if (vision) "on" else "off"} --- $modelName ${modelFile.length() / 1_000_000} MB, temp ${tempC()}C battery ${battery()}% PSS ${pssMb()} MB")
         val t0 = SystemClock.elapsedRealtime()
         withContext(Dispatchers.Default) {
@@ -352,8 +371,9 @@ class MainActivity : Activity() {
     /** Makes sure the engine has the vision encoder; reloads automatically when needed. */
     private suspend fun ensureVision(): Boolean {
         if (engine != null && visionLoaded) return true
+        if (engine == null && wantVision) rec("(engine was missing although vision was wanted: a previous load failed or was closed)")
         if (!modelFile.exists() || modelFile.length() != modelBytes || !isVerified()) { rec("Model missing or not verified. Download and verify first."); return false }
-        rec("Vision encoder not loaded. Reloading ${if (engine != null) backendName else "CPU"} engine with vision (automatic).")
+        rec("Vision encoder not loaded (engine=${engine != null}, visionLoaded=$visionLoaded, wantVision=$wantVision). Reloading ${if (engine != null) backendName else "CPU"} engine with vision (automatic).")
         loadEngine(if (engine != null) loadedGpu else false, vision = true, smoke = false)
         return engine != null && visionLoaded
     }
@@ -436,7 +456,7 @@ class MainActivity : Activity() {
     /** Qwen3.5 keeps recurrent state across conversations on one Engine (model card note), so use a fresh Engine per request. */
     private suspend fun freshIfNeeded() {
         if (!cur.freshEngine || engine == null) return
-        val gpu = loadedGpu; val vis = visionLoaded
+        val gpu = loadedGpu; val vis = wantVision
         val t0 = SystemClock.elapsedRealtime()
         loadEngine(gpu, vis, false, quiet = true)
         say("(fresh engine for this request: ${SystemClock.elapsedRealtime() - t0} ms)")
