@@ -141,7 +141,7 @@ class MainActivity : Activity() {
         btn("3. Pick photos (up to 30)") { pick() }
         btn("4. Run benchmark on picked photos") { benchmark() }
         question = EditText(this).apply {
-            hint = "Question (5 = text only, no photo / 5b = about the last picked photo)"
+            hint = "Question for the AI"
             inputType = InputType.TYPE_CLASS_TEXT
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
