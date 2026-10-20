@@ -83,8 +83,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 48, 24, 24)
         }
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun btn(text: String, onClick: () -> Unit) {
-            root.addView(Button(this).apply { this.text = text; setOnClickListener { onClick() } })
+            buttons.addView(Button(this).apply { this.text = text; setOnClickListener { onClick() } })
         }
         btn("1. Download model (Wi-Fi only, 2.6 GB)") { download() }
         btn("1a. Allow background (disable battery optimization)") {
@@ -106,9 +107,8 @@ class MainActivity : Activity() {
         question = EditText(this).apply {
             hint = "Ask AI (text only if no photo picked)"
             inputType = InputType.TYPE_CLASS_TEXT
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        root.addView(question)
-        btn("5. Ask AI") { ask() }
         btn("Delete current model file") { if (Dl.busy.get()) { say("Press Stop first, wait for it to stop, then delete."); return@btn }; modelFile.delete(); verifiedMarker.delete(); say("Deleted $modelName.") }
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
@@ -120,7 +120,17 @@ class MainActivity : Activity() {
             addView(log)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         }
+        root.addView(ScrollView(this).apply {
+            addView(buttons)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        })
         root.addView(scroll)
+        // Input bar at the bottom, always visible above the keyboard (adjustResize).
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(question)
+            addView(Button(this@MainActivity).apply { text = "5. Ask AI"; setOnClickListener { ask() } })
+        })
         setContentView(root)
         scope.launch {
             while (true) { refreshStatus(); kotlinx.coroutines.delay(1000) }
