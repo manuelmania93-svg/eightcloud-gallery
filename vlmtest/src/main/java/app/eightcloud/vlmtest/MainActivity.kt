@@ -54,6 +54,11 @@ class MainActivity : Activity() {
     private var backendName = ""
     private var photos: List<File> = emptyList()
     private var job: Job? = null
+    private lateinit var statusView: TextView
+    @Volatile private var dlActive = false
+    private var lastSize = 0L
+    private var lastTick = 0L
+    private var speed = ""
 
     private var useGpuVariant = false
     private val modelName get() = if (useGpuVariant) "gemma-4-E2B-it-gpu.litertlm" else "gemma-4-E2B-it.litertlm"
@@ -101,6 +106,8 @@ class MainActivity : Activity() {
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
         btn("Stop") { job?.cancel(); say("stopped") }
+        statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
+        root.addView(statusView, 0)
         log = TextView(this).apply { textSize = 12f; setTextIsSelectable(true) }
         scroll = ScrollView(this).apply {
             addView(log)
@@ -108,6 +115,9 @@ class MainActivity : Activity() {
         }
         root.addView(scroll)
         setContentView(root)
+        scope.launch {
+            while (true) { refreshStatus(); kotlinx.coroutines.delay(1000) }
+        }
         say("Device: ${android.os.Build.MODEL} (${android.os.Build.HARDWARE}), RAM " +
             "${(getSystemService(ACTIVITY_SERVICE) as ActivityManager).let { am ->
                 ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem / 1_000_000
@@ -119,6 +129,27 @@ class MainActivity : Activity() {
         super.onDestroy()
         runCatching { engine?.close() }
         scope.cancel()
+    }
+
+    private fun refreshStatus() {
+        val f = modelFile
+        val size = if (f.exists()) f.length() else 0L
+        val now = SystemClock.elapsedRealtime()
+        if (lastTick > 0 && now > lastTick && size >= lastSize) {
+            val bps = (size - lastSize) * 1000 / (now - lastTick)
+            speed = if (dlActive) " | ${bps / 1_000_000}.${(bps / 100_000) % 10} MB/s" else ""
+        }
+        lastSize = size; lastTick = now
+        val pct = size * 100 / modelBytes
+        val state = when {
+            dlActive -> "DOWNLOADING"
+            size == modelBytes && isVerified() -> "COMPLETE, VERIFIED (ready to load)"
+            size == modelBytes -> "COMPLETE, NOT VERIFIED (press 1c)"
+            size == 0L -> "NOT DOWNLOADED"
+            else -> "INCOMPLETE (press 1 to resume)"
+        }
+        val eng = if (engine != null) " | engine loaded ($backendName)" else ""
+        statusView.text = "$modelName\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng"
     }
 
     private fun say(s: String) {
@@ -157,6 +188,7 @@ class MainActivity : Activity() {
         job?.cancel()
         job = scope.launch {
             withContext(Dispatchers.IO) {
+                dlActive = true
                 runCatching {
                     val f = modelFile
                     var have = if (f.exists()) f.length() else 0L
@@ -187,6 +219,7 @@ class MainActivity : Activity() {
                     say(if (f.length() == modelBytes) "Download complete and size matches (${f.length()} bytes). Press 1c to verify."
                         else "Size mismatch: ${f.length()} vs expected $modelBytes. Press download again to resume.")
                 }.onFailure { say("Download error: ${it.message}. Press download again to resume.") }
+                dlActive = false
             }
         }
     }
