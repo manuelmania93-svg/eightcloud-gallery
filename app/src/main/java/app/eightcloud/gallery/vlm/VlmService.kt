@@ -153,8 +153,6 @@ class VlmService : Service() {
     private suspend fun runPass(limit: Int) {
         if (!VlmModel.isVerified(this)) { VlmState.status("Model is not downloaded or not verified."); return }
         val fullRun = limit == 0
-        val queue = if (fullRun) VlmSelect.fullQueue(this) else VlmSelect.pending(this).take(limit).map { VlmSelect.Job(it, true) }
-        if (queue.isEmpty()) { VlmState.status("Nothing left to check."); return }
         val engine = VlmEngine(this)
         val dao = BackupDb.get(this).vlmDao()
         var done = 0
@@ -162,8 +160,13 @@ class VlmService : Service() {
         var loaded = false
         var activeMs = 0L
         VlmState.paused(false)
-        VlmState.progress(0, queue.size)
         try {
+            while (true) {
+            // Re-read the queue each round: photos added or scanned meanwhile are picked up automatically.
+            val queue = if (fullRun) VlmSelect.fullQueue(this) else VlmSelect.pending(this).take(limit).map { VlmSelect.Job(it, true) }
+            if (queue.isEmpty()) break
+            val doneBefore = done
+            VlmState.progress(done, done + queue.size)
             for (job in queue) {
                 var why = waitReason(fullRun)
                 while (why != null) {
@@ -189,11 +192,13 @@ class VlmService : Service() {
                 done++
                 activeMs += System.currentTimeMillis() - t
                 if (done % 10 == 0) VlmState.bump()
-                VlmState.progress(done, queue.size)
+                VlmState.progress(done, doneBefore + queue.size)
                 val per = activeMs / done / 1000.0
-                val etaH = per * (queue.size - done) / 3600.0
-                note("Checked $done of ${queue.size} (ignored $ignored), ${"%.1f".format(per)} s per photo, about ${"%.1f".format(etaH)} h left")
+                val etaH = per * (doneBefore + queue.size - done) / 3600.0
+                note("Checked $done of ${doneBefore + queue.size} (ignored $ignored), ${"%.1f".format(per)} s per photo, about ${"%.1f".format(etaH)} h left")
                 delay(50)
+            }
+            if (!fullRun) break
             }
             VlmState.status("Done: checked $done photos, ignored $ignored (refusal or bad format).")
         } finally {

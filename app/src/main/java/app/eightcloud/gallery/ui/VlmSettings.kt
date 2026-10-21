@@ -44,7 +44,15 @@ fun VlmSettings(viewModel: GalleryViewModel) {
 
     LaunchedEffect(running, status) { tick++ }
     LaunchedEffect(running) { while (running) { delay(2000); tick++ } }
+    var remaining by remember { mutableIntStateOf(-1) }
+    // Remaining photos: refreshed on every result batch and every 20 s while Settings is open.
     LaunchedEffect(version) { unsure = withContext(Dispatchers.IO) { VlmSelect.pending(context).size } }
+    LaunchedEffect(version, running) {
+        while (true) {
+            remaining = withContext(Dispatchers.IO) { VlmSelect.fullQueue(context).size }
+            delay(20000)
+        }
+    }
 
     val verified = tick.let { VlmModel.isVerified(context) }
     val onDisk = tick.let { VlmModel.onDiskBytes(context) }
@@ -73,7 +81,7 @@ fun VlmSettings(viewModel: GalleryViewModel) {
         modifier = Modifier.padding(top = 8.dp)
     )
     Text(
-        "Photos with an AI check: ${results.size}. Unsure and unchecked: ${if (unsure < 0) "..." else unsure.toString()}. Only unsure photos can change Memes/Drawn; the rest get a description. Results stay when you delete the model.",
+        "Photos with an AI check: ${results.size}. Remaining to check: ${if (remaining < 0) "..." else remaining.toString()} (of those ${if (unsure < 0) "..." else unsure.toString()} unsure, done first). New photos are added automatically once the normal scan has seen them. Only unsure photos can change Memes/Drawn; the rest get a description. Results stay when you delete the model.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )

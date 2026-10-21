@@ -57,7 +57,8 @@ object VlmSelect {
             while (c.moveToNext()) {
                 val id = c.getLong(0)
                 if (id in done || id in secure || id in seen) continue
-                val nsfw = labels[id]?.nsfwScore ?: -1f
+                // Wait until the normal scanner has seen the photo (needed for the Sensitive check).
+                val nsfw = labels[id]?.nsfwScore ?: continue
                 if (nsfw >= Categories.NSFW_THRESHOLD) continue
                 rest += Job(id, false)
             }
