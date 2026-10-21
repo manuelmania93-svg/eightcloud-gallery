@@ -4,7 +4,6 @@ import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.eightcloud.gallery.backup.BackupDb
-import app.eightcloud.gallery.backup.MIGRATION_12_13
 import app.eightcloud.gallery.backup.MediaLabelEntry
 import app.eightcloud.gallery.backup.VlmResult
 import kotlinx.coroutines.runBlocking
@@ -28,7 +27,7 @@ class VlmMigrationTest {
         db1.openHelper.writableDatabase.execSQL("PRAGMA user_version = 12")
         db1.close()
 
-        val db2 = Room.databaseBuilder(ctx, BackupDb::class.java, name).addMigrations(MIGRATION_12_13).build()
+        val db2 = Room.databaseBuilder(ctx, BackupDb::class.java, name).addMigrations(BackupDb.MIGRATION_12_13).build()
         val old = db2.mediaLabelDao().byId(42L)
         assertNotNull(old)
         assertEquals("~meme:0.2", old!!.labelConfs)
