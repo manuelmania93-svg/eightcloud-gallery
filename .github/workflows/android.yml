@@ -19,8 +19,14 @@ jobs:
           validate-wrappers: true
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --stacktrace
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -37,6 +43,10 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          df -h /
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -49,4 +59,23 @@ jobs:
           target: default
           arch: x86_64
           profile: Nexus 6
-          script: ./gradlew connectedDebugAndroidTest --stacktrace
+          disk-size: 4096M
+          script: |
+            ./gradlew connectedDebugAndroidTest --stacktrace
+            adb pull /sdcard/Pictures/8cg-ui ./ui-screenshots || true
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: app/build/reports/androidTests/connected/
+
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: ui-screenshots/
