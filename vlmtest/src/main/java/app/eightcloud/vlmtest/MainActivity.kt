@@ -201,26 +201,33 @@ class MainActivity : Activity() {
         btn("6. Memory / mmap diagnostics") { diagnostics() }
         btn("Copy results") { copyResults() }
         btn("Stop") { Dl.cancel = true; runCatching { activeConv?.cancelProcess() }; getSharedPreferences("dl", Context.MODE_PRIVATE).edit().clear().apply(); if (busy.get() || engine != null) { job?.cancel(); say("Stop: restarting the app to free the model memory for real."); restartProcess("Stop pressed during '$actionName'") } else say("stopped") }
-        statusView = TextView(this).apply { textSize = 14f; setPadding(0, 8, 0, 8); setBackgroundColor(0xFFEEEEEE.toInt()) }
+        statusView = TextView(this).apply { textSize = 11f; setPadding(6, 4, 6, 4); maxLines = 3; setBackgroundColor(0xFFEEEEEE.toInt()) }
         root.addView(statusView, 0)
         log = TextView(this).apply { textSize = 12f; setTextColor(0xFF222222.toInt()); setTextIsSelectable(true) }
         scroll = ScrollView(this).apply {
             addView(log)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.5f)
         }
-        root.addView(Button(this).apply {
-            text = "Hide / show buttons"; textSize = 11f; isAllCaps = false; minHeight = 0; minimumHeight = 0; setPadding(6, 2, 6, 2)
-            setOnClickListener { panel?.let { it.visibility = if (it.visibility == android.view.View.VISIBLE) android.view.View.GONE else android.view.View.VISIBLE } }
+        fun toggle(label: String, target: () -> android.view.View?) = Button(this).apply {
+            text = label; textSize = 11f; isAllCaps = false; minHeight = 0; minimumHeight = 0; setPadding(4, 2, 4, 2)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { target()?.let { it.visibility = if (it.visibility == android.view.View.VISIBLE) android.view.View.GONE else android.view.View.VISIBLE } }
+        }
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(toggle("Buttons on/off") { panel })
+            addView(toggle("Answer on/off") { answerScroll })
+            addView(toggle("Log on/off") { scroll })
         })
         root.addView(ScrollView(this).apply {
             addView(buttons)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 3f)
         }.also { panel = it })
         answerView = TextView(this).apply { textSize = 18f; setTextColor(0xFF000000.toInt()); setBackgroundColor(0xFFFFFFE0.toInt()); setPadding(12, 8, 12, 8); setTextIsSelectable(true); text = "AI answers appear here (big text, you can select and copy).\n" }
         answerScroll = ScrollView(this).apply {
             addView(answerView)
             setBackgroundColor(0xFFFFFFE0.toInt())
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.2f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f)
         }
         root.addView(answerScroll)
         root.addView(scroll)
@@ -236,6 +243,14 @@ class MainActivity : Activity() {
             while (true) { refreshStatus(); kotlinx.coroutines.delay(1000) }
         }
         showPrevious()
+        run {
+            val pmx = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            if (!pmx.isIgnoringBatteryOptimizations(packageName)) say("Hint: press 1a and allow, so the download survives leaving the app. Also set battery to Unrestricted in system app settings.")
+            if (intent?.getBooleanExtra("demo", false) == true) {
+                answerView.text = "Q: Describe this photo.\nA (4.2 s): MEME: no\nDRAWN: no\nSCREENSHOT: no\nDESCRIPTION: a man standing on a beach at sunset\n\n#2  (3.9 s)\nMEME: yes\nDRAWN: no\nSCREENSHOT: no\nDESCRIPTION: cartoon bear with text caption\n\n"
+                for (i in 1..30) say("demo log line $i: first=1200ms total=4000ms temp=41.0C")
+            }
+        }
         autoResume()
         say("Device: ${android.os.Build.MODEL} (${android.os.Build.HARDWARE}), RAM " +
             "${(getSystemService(ACTIVITY_SERVICE) as ActivityManager).let { am ->
@@ -268,10 +283,9 @@ class MainActivity : Activity() {
             size == 0L -> "NOT DOWNLOADED"
             else -> "INCOMPLETE (press 1 to resume)"
         }
-        val pmx = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-        val hint = if (!pmx.isIgnoringBatteryOptimizations(packageName)) "\nHint: press 1a and allow, so the download survives leaving the app. Also set battery to Unrestricted in system app settings." else ""
         val eng = if (engine != null) " | engine loaded ($backendName)" else ""
-        statusView.text = "SELECTED: ${cur.label}\n$modelName | free storage ${freeMb()} MB\n${size / 1_000_000} / ${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$hint"
+        val short = cur.label.substringBefore(":") + ": " + cur.label.substringAfter(": ").take(28)
+        statusView.text = "$short | free ${freeMb() / 1000} GB\n${size / 1_000_000}/${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng"
     }
 
     private val liveLog get() = File(filesDir, "livelog.txt")
