@@ -462,10 +462,13 @@ private fun InfoPanel(viewModel: GalleryViewModel, item: MediaItem, modifier: Mo
                 val entry = labelsMap[item.id]
                 if (entry != null && !item.isVideo) {
                     val b = item.bucket.lowercase()
+                    val vlmMap by viewModel.vlmResults.collectAsState()
+                    val vlmRow = vlmMap[item.id]
                     val cats = app.eightcloud.gallery.labels.Categories.forItem(
                         entry.faceCount, entry.faceMaxRatio, confsOf(entry), entry.ocrChars,
                         entry.nsfwScore, b.contains("screenshot"),
-                        b.contains("camera") || b.contains("dcim")
+                        b.contains("camera") || b.contains("dcim"),
+                        vlmRow?.meme, vlmRow?.drawn
                     )
                     val excluded = overridesMap[item.id]?.filterValues { it }?.keys ?: emptySet()
                     Text(
@@ -510,6 +513,10 @@ private fun InfoPanel(viewModel: GalleryViewModel, item: MediaItem, modifier: Mo
                         )
                     }
                     infoRow("Text (OCR)", entry.ocrChars.toString() + " chars")
+                    vlmRow?.let { r ->
+                        infoRow("AI check (Gemma)", (if (r.meme) "meme, " else "") + (if (r.drawn) "drawn, " else "") +
+                            (if (r.screenshot) "screenshot, " else "") + r.description.ifBlank { "no description" })
+                    }
                     if (entry.nsfwScore >= 0f) {
                         infoRow(
                             "Sensitive score",

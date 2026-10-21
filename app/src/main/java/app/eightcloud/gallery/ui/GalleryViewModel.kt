@@ -53,7 +53,8 @@ internal fun matchesSmartAlbum(
     key: String,
     labelsById: Map<Long, app.eightcloud.gallery.backup.MediaLabelEntry> = emptyMap(),
     overrides: Map<Long, Map<String, Boolean>> = emptyMap(),
-    personPhotos: Map<Long, Set<Long>> = emptyMap()
+    personPhotos: Map<Long, Set<Long>> = emptyMap(),
+    vlm: Map<Long, app.eightcloud.gallery.backup.VlmResult> = emptyMap()
 ): Boolean {
     val b = item.bucket.lowercase()
     if (key.startsWith("person:")) {
@@ -71,7 +72,9 @@ internal fun matchesSmartAlbum(
             ocrChars = entry.ocrChars,
             nsfwScore = entry.nsfwScore,
             isScreenshot = b.contains("screenshot"),
-            cameraBucket = b.contains("camera") || b.contains("dcim")
+            cameraBucket = b.contains("camera") || b.contains("dcim"),
+            vlmMeme = vlm[item.id]?.meme,
+            vlmDrawn = vlm[item.id]?.drawn
         )
         return key in cats
     }
@@ -466,6 +469,25 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     val labelScanProgress: StateFlow<Pair<Int, Int>?> = _labelScanProgress
     private var labelScanJob: kotlinx.coroutines.Job? = null
 
+    // Second pass (Gemma) verdicts. Only rows with ver > 0 are usable (ver -1 = tried, ignored).
+    private val _vlmResults = MutableStateFlow<Map<Long, app.eightcloud.gallery.backup.VlmResult>>(emptyMap())
+    val vlmResults: StateFlow<Map<Long, app.eightcloud.gallery.backup.VlmResult>> = _vlmResults
+
+    private fun reloadVlm() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val rows = BackupDb.get(getApplication()).vlmDao().all().filter { it.ver > 0 }.associateBy { it.mediaStoreId }
+            _vlmResults.value = rows
+            withContext(Dispatchers.Main) { computeCategoryAlbums(); applyView() }
+        }
+    }
+
+    init {
+        reloadVlm()
+        viewModelScope.launch {
+            app.eightcloud.gallery.vlm.VlmState.version.collect { v -> if (v > 0) reloadVlm() }
+        }
+    }
+
     private val _categoryOverrides = MutableStateFlow<Map<Long, Map<String, Boolean>>>(emptyMap())
     val categoryOverrides: StateFlow<Map<Long, Map<String, Boolean>>> = _categoryOverrides
 
@@ -591,7 +613,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         SmartAlbum(
                             key,
                             app.eightcloud.gallery.labels.Categories.title(key),
-                            source.count { item -> matchesSmartAlbum(item, key, labels, _categoryOverrides.value) }
+                            source.count { item -> matchesSmartAlbum(item, key, labels, _categoryOverrides.value, vlm = _vlmResults.value) }
                         )
                     }
             }
@@ -1334,7 +1356,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 var view = base
                 if (bucketFilter != null) view = view.filter { it.bucket == bucketFilter }
                 if (smart != null) view = view.filter {
-                    matchesSmartAlbum(it, smart, labelSnapshot, overrideSnapshot, _personPhotoIds.value)
+                    matchesSmartAlbum(it, smart, labelSnapshot, overrideSnapshot, _personPhotoIds.value, _vlmResults.value)
                 }
                 if (favoritesOnly) view = view.filter { favorites.contains(it.id) }
                 if (videosOnly) view = view.filter { it.isVideo }

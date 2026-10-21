@@ -531,6 +531,9 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             }
         }
 
+        VlmSettings(viewModel)
+        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
         Text(
             "Categories",
             style = MaterialTheme.typography.titleSmall,

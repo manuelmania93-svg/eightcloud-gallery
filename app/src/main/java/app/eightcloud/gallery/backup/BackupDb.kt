@@ -308,7 +308,34 @@ interface GeoDao {
     suspend fun locatedCount(): Int
 }
 
-@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class, Person::class, FaceEntity::class, FaceScan::class, ClipEmbedding::class], version = 12, exportSchema = false)
+/** Second-pass (Gemma) result per photo. Independent of the model file: survives its deletion. */
+@Entity(tableName = "vlm_results")
+data class VlmResult(
+    @PrimaryKey val mediaStoreId: Long,
+    val meme: Boolean,
+    val drawn: Boolean,
+    val screenshot: Boolean,
+    val description: String,
+    val ver: Int,
+    val scannedAt: Long
+)
+
+@Dao
+interface VlmDao {
+    @Query("SELECT * FROM vlm_results")
+    suspend fun all(): List<VlmResult>
+
+    @Query("SELECT mediaStoreId FROM vlm_results")
+    suspend fun ids(): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: VlmResult)
+
+    @Query("SELECT COUNT(*) FROM vlm_results")
+    suspend fun count(): Int
+}
+
+@Database(entities = [BackupEntry::class, SecureEntry::class, MediaLabelEntry::class, GeoEntry::class, CategoryOverride::class, Person::class, FaceEntity::class, FaceScan::class, ClipEmbedding::class, VlmResult::class], version = 13, exportSchema = false)
 abstract class BackupDb : RoomDatabase() {
     abstract fun dao(): BackupDao
     abstract fun secureDao(): SecureDao
@@ -319,6 +346,7 @@ abstract class BackupDb : RoomDatabase() {
     abstract fun faceDao(): FaceDao
     abstract fun faceScanDao(): FaceScanDao
     abstract fun clipDao(): ClipDao
+    abstract fun vlmDao(): VlmDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -404,6 +432,17 @@ abstract class BackupDb : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS vlm_results (mediaStoreId INTEGER NOT NULL, " +
+                        "meme INTEGER NOT NULL, drawn INTEGER NOT NULL, screenshot INTEGER NOT NULL, " +
+                        "description TEXT NOT NULL, ver INTEGER NOT NULL, scannedAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(mediaStoreId))"
+                )
+            }
+        }
+
         private val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE clip_embeddings ADD COLUMN ver INTEGER NOT NULL DEFAULT 1")
@@ -451,7 +490,7 @@ abstract class BackupDb : RoomDatabase() {
                 context.applicationContext,
                 BackupDb::class.java,
                 "backup-index.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13).build().also { instance = it }
         }
     }
 }

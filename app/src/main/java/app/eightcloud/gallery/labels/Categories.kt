@@ -99,7 +99,9 @@ object Categories {
         ocrChars: Int,
         nsfwScore: Float,
         isScreenshot: Boolean,
-        cameraBucket: Boolean
+        cameraBucket: Boolean,
+        vlmMeme: Boolean? = null,
+        vlmDrawn: Boolean? = null
     ): Set<String> {
         val all = parseConfs(labelConfs)
         // CLIP zero-shot masses are stored as "~category:share" pseudo-labels.
@@ -136,11 +138,14 @@ object Categories {
         if (!isScreenshot && clipHit("document", CLIP_DOCUMENT) && ocrChars >= 20) out += DOCUMENTS
 
         // Drawn / cartoon / anime: CLIP only (no legacy fallback).
-        if (clipHit("drawn", CLIP_DRAWN)) out += DRAWN
+        // The VLM verdict (when the photo got a second pass) replaces CLIP's guess for drawn/memes only.
+        if (vlmDrawn ?: clipHit("drawn", CLIP_DRAWN)) out += DRAWN
 
         // Memes: with CLIP, the meme-prompt share plus some real text; plain screenshots
         // and documents no longer count. Legacy rows without CLIP keep the old rule.
-        if (hasClip) {
+        if (vlmMeme != null) {
+            if (vlmMeme && ocrChars >= MEME_CLIP_MIN_OCR_CHARS) out += MEMES
+        } else if (hasClip) {
             if (clipHit("meme", CLIP_MEME) && ocrChars >= MEME_CLIP_MIN_OCR_CHARS) out += MEMES
         } else if (isScreenshot && ocrChars >= MEME_MIN_OCR_CHARS) out += MEMES
 
