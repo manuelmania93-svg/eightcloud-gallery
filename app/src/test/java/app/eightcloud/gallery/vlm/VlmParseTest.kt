@@ -72,11 +72,11 @@ class VlmParseTest {
 
     @Test
     fun heatHasHysteresis() {
-        assertFalse(VlmGate.hotNext(false, 41f, 0))
-        assertTrue(VlmGate.hotNext(false, 42f, 0))
+        assertFalse(VlmGate.hotNext(false, 44f, 0))
+        assertTrue(VlmGate.hotNext(false, 45f, 0))
         assertTrue(VlmGate.hotNext(false, 30f, 3)) // severe thermal status
-        assertTrue(VlmGate.hotNext(true, 40f, 0)) // still hot until 38
-        assertFalse(VlmGate.hotNext(true, 38f, 0))
+        assertTrue(VlmGate.hotNext(true, 43f, 0)) // still hot until 41
+        assertFalse(VlmGate.hotNext(true, 41f, 0))
         assertTrue(VlmGate.hotNext(true, 35f, 3))
     }
 
