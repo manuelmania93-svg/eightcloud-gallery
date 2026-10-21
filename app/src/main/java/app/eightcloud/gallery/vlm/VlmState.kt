@@ -13,6 +13,18 @@ object VlmState {
     private val _version = MutableStateFlow(0)
     val version: StateFlow<Int> = _version
 
+    /** User pressed Pause. */
+    private val _paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> = _paused
+    /** Why the pass is waiting on its own (heat, battery, charger), or blank. */
+    private val _autoPause = MutableStateFlow("")
+    val autoPause: StateFlow<String> = _autoPause
+    private val _progress = MutableStateFlow(Pair(0, 0)) // done, total in this run
+    val progress: StateFlow<Pair<Int, Int>> = _progress
+
+    fun paused(p: Boolean) { _paused.value = p }
+    fun autoPause(s: String) { _autoPause.value = s }
+    fun progress(done: Int, total: Int) { _progress.value = Pair(done, total) }
     fun status(s: String) { _status.value = s }
     fun running(r: Boolean) { _running.value = r }
     fun bump() { _version.value = _version.value + 1 }

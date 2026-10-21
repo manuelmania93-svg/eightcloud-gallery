@@ -33,4 +33,35 @@ object VlmSelect {
             it.mediaStoreId !in done && it.mediaStoreId !in secure && isUnsure(it.labelConfs, it.ocrChars, it.nsfwScore)
         }.map { it.mediaStoreId }
     }
+
+    /** Queue entry: id plus whether it is an "unsure" photo (its verdict may change categories). */
+    data class Job(val id: Long, val unsure: Boolean)
+
+    /**
+     * Everything still to do: unsure photos first, then all other images (newest first).
+     * Skips the secure folder and Sensitive photos (nsfw >= 0.7), which never go to the model.
+     */
+    suspend fun fullQueue(context: android.content.Context): List<Job> {
+        val db = app.eightcloud.gallery.backup.BackupDb.get(context)
+        val done = db.vlmDao().ids().toSet()
+        val secure = db.secureDao().ids().toSet()
+        val labels = db.mediaLabelDao().all().associateBy { it.mediaStoreId }
+        val unsure = pending(context).map { Job(it, true) }
+        val seen = unsure.map { it.id }.toHashSet()
+        val rest = ArrayList<Job>()
+        context.contentResolver.query(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(android.provider.MediaStore.Images.Media._ID), null, null,
+            android.provider.MediaStore.Images.Media.DATE_ADDED + " DESC"
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getLong(0)
+                if (id in done || id in secure || id in seen) continue
+                val nsfw = labels[id]?.nsfwScore ?: -1f
+                if (nsfw >= Categories.NSFW_THRESHOLD) continue
+                rest += Job(id, false)
+            }
+        }
+        return unsure + rest
+    }
 }

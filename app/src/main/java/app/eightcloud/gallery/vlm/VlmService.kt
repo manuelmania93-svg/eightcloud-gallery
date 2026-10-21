@@ -120,42 +120,86 @@ class VlmService : Service() {
         }
     }
 
+    private fun batteryTempC(): Float {
+        val i = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        return (i?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
+    }
+
+    private fun batteryPct(): Int {
+        val i = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val l = i?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val sc = i?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+        return if (l < 0) 100 else l * 100 / sc
+    }
+
+    private var hot = false
+
+    /** Why the pass must wait right now, or null to go on. Heat has hysteresis: stop at 42 C, resume at 38 C. */
+    private fun waitReason(fullRun: Boolean): String? {
+        if (VlmState.paused.value) return "Paused by you."
+        val t = batteryTempC()
+        var thermal = 0
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            thermal = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).currentThermalStatus
+        }
+        hot = VlmGate.hotNext(hot, t, thermal)
+        if (hot) return "Auto-paused: phone is hot (${"%.0f".format(t)} C). Resumes at 38 C."
+        val charging = isCharging(this)
+        if (VlmGate.lowBattery(charging, batteryPct())) return "Auto-paused: battery under 15% and not charging."
+        if (fullRun && !charging) return "Waiting for the charger (full run needs it)."
+        return null
+    }
+
     private suspend fun runPass(limit: Int) {
         if (!VlmModel.isVerified(this)) { VlmState.status("Model is not downloaded or not verified."); return }
-        val pending = VlmSelect.pending(this).let { if (limit > 0) it.take(limit) else it }
-        if (pending.isEmpty()) { VlmState.status("No unsure photos left to check."); return }
-        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val fullRun = limit == 0
+        val queue = if (fullRun) VlmSelect.fullQueue(this) else VlmSelect.pending(this).take(limit).map { VlmSelect.Job(it, true) }
+        if (queue.isEmpty()) { VlmState.status("Nothing left to check."); return }
         val engine = VlmEngine(this)
         val dao = BackupDb.get(this).vlmDao()
         var done = 0
         var ignored = 0
-        val t0 = System.currentTimeMillis()
+        var loaded = false
+        var activeMs = 0L
+        VlmState.paused(false)
+        VlmState.progress(0, queue.size)
         try {
-            note("Loading model...")
-            engine.load()
-            for (id in pending) {
-                if (limit == 0 && (!isCharging(this) || !pm.isInteractive)) {
-                    VlmState.status("Paused after $done photos: needs charger and screen on. Start again to continue.")
-                    return
+            for (job in queue) {
+                var why = waitReason(fullRun)
+                while (why != null) {
+                    if (loaded) { engine.close(); loaded = false } // free the model memory while waiting
+                    if (VlmState.paused.value) VlmState.autoPause("") else VlmState.autoPause(why)
+                    note(why)
+                    delay(5000)
+                    why = waitReason(fullRun)
                 }
-                val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                VlmState.autoPause("")
+                if (!loaded) { note("Loading model..."); engine.load(); loaded = true }
+                val t = System.currentTimeMillis()
+                val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, job.id)
                 val v = runCatching { engine.analyze(uri) }.getOrNull()
                 if (v == null) {
                     ignored++
-                    dao.upsert(VlmResult(id, false, false, false, "", -1, System.currentTimeMillis())) // ver -1: tried, no usable answer, never used
+                    // ver -1: tried, no usable answer (refusal / bad format / unreadable); never used for tags.
+                    dao.upsert(VlmResult(job.id, false, false, false, "", -1, System.currentTimeMillis()))
                 } else {
-                    dao.upsert(VlmResult(id, v.meme, v.drawn, v.screenshot, v.description, VlmModel.PROMPT_VER, System.currentTimeMillis()))
+                    // ver 1 = unsure photo (verdict may change Memes/Drawn); ver 2 = bulk photo (description only).
+                    dao.upsert(VlmResult(job.id, v.meme, v.drawn, v.screenshot, v.description, if (job.unsure) 1 else 2, System.currentTimeMillis()))
                 }
                 done++
-                // Refusals and malformed output are not stored, so they stay pending but never change tags.
+                activeMs += System.currentTimeMillis() - t
                 if (done % 10 == 0) VlmState.bump()
-                val perPhoto = (System.currentTimeMillis() - t0) / done / 1000.0
-                note("Checked $done of ${pending.size} (ignored $ignored), ${"%.1f".format(perPhoto)} s per photo")
+                VlmState.progress(done, queue.size)
+                val per = activeMs / done / 1000.0
+                val etaH = per * (queue.size - done) / 3600.0
+                note("Checked $done of ${queue.size} (ignored $ignored), ${"%.1f".format(per)} s per photo, about ${"%.1f".format(etaH)} h left")
                 delay(50)
             }
             VlmState.status("Done: checked $done photos, ignored $ignored (refusal or bad format).")
         } finally {
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { engine.close() }
+            VlmState.autoPause("")
+            VlmState.paused(false)
         }
     }
 }

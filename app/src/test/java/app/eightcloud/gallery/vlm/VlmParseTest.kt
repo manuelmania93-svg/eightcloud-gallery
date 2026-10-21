@@ -69,4 +69,21 @@ class VlmParseTest {
         // No VLM row: unchanged CLIP behavior.
         assertTrue(Categories.DRAWN in Categories.forItem(0, 0f, clip(0f, 0.5f), 0, 0f, false, false))
     }
+
+    @Test
+    fun heatHasHysteresis() {
+        assertFalse(VlmGate.hotNext(false, 41f, 0))
+        assertTrue(VlmGate.hotNext(false, 42f, 0))
+        assertTrue(VlmGate.hotNext(false, 30f, 3)) // severe thermal status
+        assertTrue(VlmGate.hotNext(true, 40f, 0)) // still hot until 38
+        assertFalse(VlmGate.hotNext(true, 38f, 0))
+        assertTrue(VlmGate.hotNext(true, 35f, 3))
+    }
+
+    @Test
+    fun lowBatteryOnlyWhenNotCharging() {
+        assertTrue(VlmGate.lowBattery(false, 14))
+        assertFalse(VlmGate.lowBattery(true, 5))
+        assertFalse(VlmGate.lowBattery(false, 15))
+    }
 }

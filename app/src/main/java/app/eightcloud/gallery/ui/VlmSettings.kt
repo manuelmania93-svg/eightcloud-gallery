@@ -73,7 +73,7 @@ fun VlmSettings(viewModel: GalleryViewModel) {
         modifier = Modifier.padding(top = 8.dp)
     )
     Text(
-        "Photos with an AI check: ${results.size}. Still unsure and unchecked: ${if (unsure < 0) "..." else unsure.toString()}. Results stay when you delete the model.",
+        "Photos with an AI check: ${results.size}. Unsure and unchecked: ${if (unsure < 0) "..." else unsure.toString()}. Only unsure photos can change Memes/Drawn; the rest get a description. Results stay when you delete the model.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -92,7 +92,25 @@ fun VlmSettings(viewModel: GalleryViewModel) {
         TextButton(onClick = { showTutorial = true }) { Text("How it works") }
     }
     if (running) {
-        OutlinedButton(onClick = { VlmService.start(context, VlmService.ACTION_STOP) }) { Text("Stop") }
+        val paused by VlmState.paused.collectAsState()
+        val auto by VlmState.autoPause.collectAsState()
+        val prog by VlmState.progress.collectAsState()
+        if (prog.second > 0 && !downloading) {
+            Text(
+                "This run: ${prog.first} of ${prog.second} photos" + if (auto.isNotBlank()) ". $auto" else "",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        Row {
+            if (!downloading) {
+                Button(onClick = { VlmState.paused(!paused) }) { Text(if (paused) "Resume" else "Pause") }
+            }
+            OutlinedButton(
+                modifier = Modifier.padding(start = 8.dp),
+                onClick = { VlmService.start(context, VlmService.ACTION_STOP) }
+            ) { Text("Stop") }
+        }
     }
     if (verified && !running) {
         Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
@@ -100,13 +118,13 @@ fun VlmSettings(viewModel: GalleryViewModel) {
             Button(
                 modifier = Modifier.padding(start = 8.dp),
                 onClick = {
-                    if (!VlmService.isCharging(context)) VlmState.status("Plug in the charger first, and keep the screen on.")
+                    if (!VlmService.isCharging(context)) VlmState.status("Plug in the charger first.")
                     else VlmService.start(context, VlmService.ACTION_PASS, 0)
                 }
-            ) { Text("Check all unsure") }
+            ) { Text("Check all photos") }
         }
         Text(
-            "The full run needs the charger and screen on, and pauses by itself otherwise. The 50-photo test works any time.",
+            "The full run does unsure photos first, then every other photo, newest first. It needs the charger, pauses by itself when the phone is hot (42 C, resumes at 38 C), the battery is under 15% or you unplug, and continues where it stopped. Stop and start again any time. The 50-photo test works without the charger.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -131,7 +149,7 @@ fun VlmSettings(viewModel: GalleryViewModel) {
                 Column {
                     Text("1. Download the model once (2.6 GB, Wi-Fi only, resumes if interrupted, checked against a checksum).")
                     Text("2. Tap \"Test on 50 photos\" and look at a few results in a photo's info sheet (\"AI check\").", modifier = Modifier.padding(top = 6.dp))
-                    Text("3. For the whole library, plug in the charger, keep the screen on and tap \"Check all unsure\". It takes a few seconds per photo and stops when you unplug.", modifier = Modifier.padding(top = 6.dp))
+                    Text("3. For the whole library, plug in the charger and tap \"Check all photos\". Unsure photos go first, then all others. It takes days in total: use Pause/Resume, it also pauses by itself when hot or low on battery and continues where it stopped. ", modifier = Modifier.padding(top = 6.dp))
                     Text("4. Delete the model any time to free space. Results stay. Download again to check more photos.", modifier = Modifier.padding(top = 6.dp))
                 }
             },

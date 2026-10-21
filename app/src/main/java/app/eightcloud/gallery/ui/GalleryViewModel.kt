@@ -73,8 +73,8 @@ internal fun matchesSmartAlbum(
             nsfwScore = entry.nsfwScore,
             isScreenshot = b.contains("screenshot"),
             cameraBucket = b.contains("camera") || b.contains("dcim"),
-            vlmMeme = vlm[item.id]?.meme,
-            vlmDrawn = vlm[item.id]?.drawn
+            vlmMeme = vlm[item.id]?.takeIf { it.ver == 1 }?.meme,
+            vlmDrawn = vlm[item.id]?.takeIf { it.ver == 1 }?.drawn
         )
         return key in cats
     }

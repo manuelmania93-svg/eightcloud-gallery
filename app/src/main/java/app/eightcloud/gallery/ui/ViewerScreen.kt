@@ -468,7 +468,7 @@ private fun InfoPanel(viewModel: GalleryViewModel, item: MediaItem, modifier: Mo
                         entry.faceCount, entry.faceMaxRatio, confsOf(entry), entry.ocrChars,
                         entry.nsfwScore, b.contains("screenshot"),
                         b.contains("camera") || b.contains("dcim"),
-                        vlmRow?.meme, vlmRow?.drawn
+                        vlmRow?.takeIf { it.ver == 1 }?.meme, vlmRow?.takeIf { it.ver == 1 }?.drawn
                     )
                     val excluded = overridesMap[item.id]?.filterValues { it }?.keys ?: emptySet()
                     Text(
