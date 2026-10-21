@@ -65,4 +65,30 @@ object VlmSelect {
         }
         return unsure + rest
     }
+
+    /** Numbers for the Settings diagnostics line. */
+    suspend fun stats(context: android.content.Context): String {
+        val db = app.eightcloud.gallery.backup.BackupDb.get(context)
+        val labels = db.mediaLabelDao().all().associateBy { it.mediaStoreId }
+        val secure = db.secureDao().ids().toSet()
+        var images = 0; var scanned = 0; var sensitive = 0; var inSecure = 0
+        context.contentResolver.query(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(android.provider.MediaStore.Images.Media._ID), null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                images++
+                val id = c.getLong(0)
+                if (id in secure) { inSecure++; continue }
+                val l = labels[id] ?: continue
+                scanned++
+                if (l.nsfwScore >= Categories.NSFW_THRESHOLD) sensitive++
+            }
+        }
+        fun mb(f: java.io.File?): Long = if (f == null || !f.exists()) 0L else f.walkTopDown().filter { it.isFile }.sumOf { it.length() } / 1_000_000
+        val files = mb(context.filesDir) - VlmModel.onDiskBytes(context) / 1_000_000
+        val dbs = mb(context.getDatabasePath("backup-index.db").parentFile)
+        return "Library: $images images, $scanned seen by the normal scan, $sensitive Sensitive (skipped), $inSecure in secure folder. " +
+            "App storage besides the model: cache ${mb(context.cacheDir)} MB, files $files MB, databases $dbs MB."
+    }
 }

@@ -742,6 +742,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
                 if (pending.isEmpty()) break
                 _labelScanProgress.value = (allItems.size - pending.size) to allItems.size
+                app.eightcloud.gallery.vlm.VlmState.scanActive = true
                 // Big rescans only run while charging (default); small ones always run.
                 while (pending.size > 200 && _scanOnlyWhileCharging.value && !isCharging()) {
                     kotlinx.coroutines.delay(30_000)
@@ -765,6 +766,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             reembedClip(scanner, videoLabels)
             _labelScanProgress.value = null
+            app.eightcloud.gallery.vlm.VlmState.scanActive = false
             rescoreClip()
             if (_autoSecureSensitive.value) moveToSecure(sensitiveNotSecure())
             applyView()

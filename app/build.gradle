@@ -18,7 +18,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 1
-        versionName "0.14.0-m2-pre"
+        versionName "0.14.1-m2-pre"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "TELEGRAM_API_ID", javaLiteral(System.getenv('TELEGRAM_API_ID') ?: '')
         buildConfigField "String", "TELEGRAM_API_HASH", javaLiteral(System.getenv('TELEGRAM_API_HASH') ?: '')

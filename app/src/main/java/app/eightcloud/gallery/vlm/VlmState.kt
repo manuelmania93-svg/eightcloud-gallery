@@ -25,6 +25,9 @@ object VlmState {
     fun paused(p: Boolean) { _paused.value = p }
     fun autoPause(s: String) { _autoPause.value = s }
     fun progress(done: Int, total: Int) { _progress.value = Pair(done, total) }
+    /** True while the normal label/CLIP scan runs; the full AI pass waits for it (CPU and heat). */
+    @Volatile var scanActive = false
+
     fun status(s: String) { _status.value = s }
     fun running(r: Boolean) { _running.value = r }
     fun bump() { _version.value = _version.value + 1 }

@@ -134,7 +134,7 @@ class VlmService : Service() {
 
     private var hot = false
 
-    /** Why the pass must wait right now, or null to go on. Heat has hysteresis: stop at 42 C, resume at 38 C. */
+    /** Why the pass must wait right now, or null to go on. Heat has hysteresis: see VlmGate. */
     private fun waitReason(fullRun: Boolean): String? {
         if (VlmState.paused.value) return "Paused by you."
         val t = batteryTempC()
@@ -143,10 +143,11 @@ class VlmService : Service() {
             thermal = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).currentThermalStatus
         }
         hot = VlmGate.hotNext(hot, t, thermal)
-        if (hot) return "Auto-paused: phone is hot (${"%.0f".format(t)} C). Resumes at 38 C."
+        if (hot) return "Auto-paused: phone is hot (${"%.0f".format(t)} C). Resumes at ${VlmGate.COOL_C.toInt()} C."
         val charging = isCharging(this)
         if (VlmGate.lowBattery(charging, batteryPct())) return "Auto-paused: battery under 15% and not charging."
         if (fullRun && !charging) return "Waiting for the charger (full run needs it)."
+        if (fullRun && VlmState.scanActive) return "Waiting for the normal photo scan to finish first (it feeds this queue and shares the CPU)."
         return null
     }
 

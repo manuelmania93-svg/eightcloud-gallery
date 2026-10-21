@@ -44,12 +44,14 @@ fun VlmSettings(viewModel: GalleryViewModel) {
 
     LaunchedEffect(running, status) { tick++ }
     LaunchedEffect(running) { while (running) { delay(2000); tick++ } }
+    var diag by remember { mutableStateOf("") }
     var remaining by remember { mutableIntStateOf(-1) }
     // Remaining photos: refreshed on every result batch and every 20 s while Settings is open.
     LaunchedEffect(version) { unsure = withContext(Dispatchers.IO) { VlmSelect.pending(context).size } }
     LaunchedEffect(version, running) {
         while (true) {
             remaining = withContext(Dispatchers.IO) { VlmSelect.fullQueue(context).size }
+            diag = withContext(Dispatchers.IO) { VlmSelect.stats(context) }
             delay(20000)
         }
     }
@@ -85,6 +87,7 @@ fun VlmSettings(viewModel: GalleryViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    if (diag.isNotBlank()) Text(diag, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
 
     Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
@@ -132,7 +135,7 @@ fun VlmSettings(viewModel: GalleryViewModel) {
             ) { Text("Check all photos") }
         }
         Text(
-            "The full run does unsure photos first, then every other photo, newest first. It needs the charger, pauses by itself when the phone is hot (42 C, resumes at 38 C), the battery is under 15% or you unplug, and continues where it stopped. Stop and start again any time. The 50-photo test works without the charger.",
+            "The full run does unsure photos first, then every other photo, newest first. It needs the charger, pauses by itself when the phone is hot (45 C, resumes at 41 C), the battery is under 15% or you unplug, and continues where it stopped. Stop and start again any time. The 50-photo test works without the charger.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
