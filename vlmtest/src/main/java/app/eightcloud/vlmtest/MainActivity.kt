@@ -101,14 +101,14 @@ class MainActivity : Activity() {
 
     private fun exclusive(name: String = "model action", block: suspend () -> Unit) {
         if (!busy.compareAndSet(false, true)) {
-            say("Busy: '$actionName' has been running for ${(SystemClock.elapsedRealtime() - actionStart) / 1000} s. Step: ${actionStep.ifBlank { "-" }}. Wait for its result line, or press Stop (clears this lock).")
+            both("Busy: '$actionName' has been running for ${(SystemClock.elapsedRealtime() - actionStart) / 1000} s. Step: ${actionStep.ifBlank { "-" }}. Wait for its result line, or press Stop (clears this lock).")
             return
         }
         val myStart = SystemClock.elapsedRealtime(); actionName = name; actionStart = myStart; actionStep = "starting"
         job = scope.launch {
             try { block() }
-            catch (t: kotlinx.coroutines.CancellationException) { rec("'$name' cancelled.") }
-            catch (t: Throwable) { rec("'$name' FAILED: ${t.javaClass.simpleName}: ${t.message}") }
+            catch (t: kotlinx.coroutines.CancellationException) { rec("'$name' cancelled."); answer("'$name' cancelled.") }
+            catch (t: Throwable) { rec("'$name' FAILED: ${t.javaClass.simpleName}: ${t.message}"); answer("'$name' FAILED: ${t.javaClass.simpleName}: ${t.message}") }
             finally { if (actionStart == myStart) { busy.set(false); actionName = ""; actionStep = "" } }
         }
     }
@@ -254,6 +254,13 @@ class MainActivity : Activity() {
             if (!pmx.isIgnoringBatteryOptimizations(packageName)) say("Hint: press 1a and allow, so the download survives leaving the app. Also set battery to Unrestricted in system app settings.")
             if (intent?.getBooleanExtra("demo", false) == true) {
                 answerView.text = "Q: Describe this photo.\nA (4.2 s): MEME: no\nDRAWN: no\nSCREENSHOT: no\nDESCRIPTION: a man standing on a beach at sunset\n\n#2  (3.9 s)\nMEME: yes\nDRAWN: no\nSCREENSHOT: no\nDESCRIPTION: cartoon bear with text caption\n\n"
+                if (intent?.getBooleanExtra("selftest", false) == true) {
+                    answerView.text = "AI answers appear here (placeholder)"
+                    showAskResult("hi", Result.success(Triple("Hello, friend!", 900L, 1700L)))
+                    showAskResult("fail case", Result.failure(IllegalStateException("example error")))
+                    answer("#3  (4.0 s)\n" + judge("I'm sorry, I can't describe that image."))
+                    answer("Busy: 'ask' has been running for 12 s. Step: generating.")
+                }
                 for (i in 1..30) say("demo log line $i: first=1200ms total=4000ms temp=41.0C")
             }
         }
@@ -291,7 +298,8 @@ class MainActivity : Activity() {
         }
         val eng = if (engine != null) " | engine loaded ($backendName)" else ""
         val short = cur.label.substringBefore(":") + ": " + cur.label.substringAfter(": ").take(28)
-        statusView.text = "$short | free ${freeMb() / 1000} GB\n${size / 1_000_000}/${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng"
+        val running = if (busy.get()) "\nRUNNING: $actionName, step: ${actionStep.ifBlank { "-" }}, ${(SystemClock.elapsedRealtime() - actionStart) / 1000} s" else ""
+        statusView.text = "$short | free ${freeMb() / 1000} GB\n${size / 1_000_000}/${modelBytes / 1_000_000} MB ($pct%) $state$speed$eng$running"
     }
 
     private val liveLog get() = File(filesDir, "livelog.txt")
@@ -348,8 +356,12 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Writes to the log and to the big answer area, so nothing important stays hidden in the log. */
+    private fun both(s: String) { say(s); answer(s) }
+
     private fun answer(s: String) {
         runOnUiThread {
+            if (answerView.text.startsWith("AI answers appear here")) answerView.text = ""
             answerView.append(s + "\n\n")
             answerScroll.post { answerScroll.fullScroll(ScrollView.FOCUS_DOWN) }
         }
@@ -447,7 +459,7 @@ class MainActivity : Activity() {
                     e.initialize()
                     engine = e
                     visionLoaded = vb != null
-                }.onFailure { rec("LOAD FAILED: ${it.javaClass.simpleName}: ${it.message}"); nativeLog("after load failure") }.isSuccess
+                }.onFailure { rec("LOAD FAILED: ${it.javaClass.simpleName}: ${it.message}"); answer("LOAD FAILED: ${it.javaClass.simpleName}: ${it.message}"); nativeLog("after load failure") }.isSuccess
                 if (ok) break
             }
         }
@@ -456,8 +468,8 @@ class MainActivity : Activity() {
             if (!quiet) rec("loaded in ${(SystemClock.elapsedRealtime() - t0) / 1000.0} s, PSS ${pssMb()} MB")
             if (smoke) {
                 val r = withContext(Dispatchers.Default) { runCatching { runText("Say hi in three words.") } }
-                r.onSuccess { (txt, first, total) -> rec("TEXT SMOKE TEST OK first=${first}ms total=${total}ms :: ${txt.replace("\n", " ")}") }
-                    .onFailure { rec("TEXT SMOKE TEST FAILED (engine loaded but unusable): ${it.javaClass.simpleName}: ${it.message}") }
+                r.onSuccess { (txt, first, total) -> rec("TEXT SMOKE TEST OK first=${first}ms total=${total}ms :: ${txt.replace("\n", " ")}"); answer("Model loaded. Smoke test OK (${total} ms): ${stripThink(txt)}") }
+                    .onFailure { rec("TEXT SMOKE TEST FAILED (engine loaded but unusable): ${it.javaClass.simpleName}: ${it.message}"); answer("SMOKE TEST FAILED: ${it.javaClass.simpleName}: ${it.message}") }
                 nativeLog("after smoke test")
             }
         }
@@ -683,7 +695,7 @@ class MainActivity : Activity() {
     private fun benchmark() {
         if (photos.isEmpty()) { say("Pick photos first (button 3)."); return }
         exclusive("benchmark") {
-            if (!ensureVision()) { rec("Benchmark aborted: vision engine could not be loaded."); return@exclusive }
+            if (!ensureVision()) { both("Benchmark aborted: vision engine could not be loaded. See the log."); return@exclusive }
             if (cur.freshEngine) rec("NOTE: ${cur.label} needs a fresh engine per photo, about 25 s each, so about ${photos.size * 25 / 60 + 1} min for ${photos.size} photos.")
             rec("--- BENCHMARK $backendName n=${photos.size} --- temp ${tempC()}C battery ${battery()}%")
             val totals = mutableListOf<Long>()
@@ -696,7 +708,7 @@ class MainActivity : Activity() {
                     totals += total; firsts += first
                     rec("#$i first=${first}ms total=${total}ms temp=${tempC()}C :: ${judge(txt).replace("\n", " | ")}")
                     answer("#${i + 1}  (${total / 1000.0} s)\n${judge(txt)}")
-                }.onFailure { rec("#$i ERROR ${it.javaClass.simpleName}: ${it.message}") }
+                }.onFailure { rec("#$i ERROR ${it.javaClass.simpleName}: ${it.message}"); answer("#${i + 1} ERROR: ${it.javaClass.simpleName}: ${it.message}") }
             }
             if (totals.isNotEmpty()) {
                 val s = totals.sorted()
@@ -706,17 +718,27 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun showAskResult(q: String, r: Result<Triple<String, Long, Long>>) {
+        r.onSuccess { (txt, first, total) ->
+            val clean = stripThink(txt)
+            rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${clean.replace("\n", " ")}")
+            answer("Q: $q\nA (${total / 1000.0} s): ${clean.ifBlank { "(the model returned an empty answer)" }}")
+        }.onFailure {
+            rec("ASK ERROR ${it.javaClass.simpleName}: ${it.message}")
+            answer("ASK ERROR: ${it.javaClass.simpleName}: ${it.message}")
+        }
+    }
+
     private fun ask(withPhoto: Boolean = false) {
-        if (!withPhoto && engine == null) { say("Load the model first (2a or 2b), then wait for 'loaded in ... s' and the smoke test line."); return }
+        if (!withPhoto && engine == null) { both("Load the model first (2a or 2b), then wait for 'loaded in ... s' and the smoke test line."); return }
         val f = if (withPhoto) photos.lastOrNull() else null
-        if (withPhoto && f == null) { say("No photo picked. Press 3 first."); return }
+        if (withPhoto && f == null) { both("No photo picked. Press 3 first."); return }
         val q = question.text.toString().ifBlank { if (f != null) "Describe this photo." else "Say hi in three words." }
-        say("ASK started (${if (f != null) "with photo" else "text only"}, engine $backendName): $q")
+        both("ASK started (${if (f != null) "with photo" else "text only"}, engine $backendName): $q\nWorking... for Qwen this takes about 25-40 s (fresh engine). The status line above shows the step.")
         exclusive("ask") {
-            if (f != null && !ensureVision()) { rec("ASK aborted: vision engine could not be loaded."); return@exclusive }
+            if (f != null && !ensureVision()) { answer("ASK aborted: vision engine could not be loaded. See the log."); rec("ASK aborted: vision engine could not be loaded."); return@exclusive }
             val r = withContext(Dispatchers.Default) { runCatching { if (f != null) runOne(f, q) else runText(q) } }
-            r.onSuccess { (txt, first, total) -> rec("ASK first=${first}ms total=${total}ms :: Q: $q :: A: ${stripThink(txt).replace("\n", " ")}"); answer("Q: $q\nA (${total / 1000.0} s): ${stripThink(txt)}") }
-                .onFailure { rec("ASK ERROR ${it.javaClass.simpleName}: ${it.message}") }
+            showAskResult(q, r)
         }
     }
 
