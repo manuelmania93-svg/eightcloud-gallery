@@ -221,13 +221,13 @@ class MainActivity : Activity() {
         })
         root.addView(ScrollView(this).apply {
             addView(buttons)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 3f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.9f)
         }.also { panel = it })
         answerView = TextView(this).apply { textSize = 18f; setTextColor(0xFF000000.toInt()); setBackgroundColor(0xFFFFFFE0.toInt()); setPadding(12, 8, 12, 8); setTextIsSelectable(true); text = "AI answers appear here (big text, you can select and copy).\n" }
         answerScroll = ScrollView(this).apply {
             addView(answerView)
             setBackgroundColor(0xFFFFFFE0.toInt())
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 2.6f)
         }
         root.addView(answerScroll)
         root.addView(scroll)
