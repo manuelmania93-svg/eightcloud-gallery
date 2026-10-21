@@ -206,7 +206,7 @@ class MainActivity : Activity() {
         log = TextView(this).apply { textSize = 12f; setTextColor(0xFF222222.toInt()); setTextIsSelectable(true) }
         scroll = ScrollView(this).apply {
             addView(log)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.5f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         }
         fun toggle(label: String, target: () -> android.view.View?) = Button(this).apply {
             text = label; textSize = 11f; isAllCaps = false; minHeight = 0; minimumHeight = 0; setPadding(4, 2, 4, 2)
@@ -219,15 +219,21 @@ class MainActivity : Activity() {
             addView(toggle("Answer on/off") { answerScroll })
             addView(toggle("Log on/off") { scroll })
         })
-        root.addView(ScrollView(this).apply {
+        root.addView(object : ScrollView(this) {
+            // Sized to its content, but never taller than 45% of the screen; scrolls beyond that.
+            override fun onMeasure(w: Int, h: Int) {
+                val max = (resources.displayMetrics.heightPixels * 0.45f).toInt()
+                super.onMeasure(w, MeasureSpec.makeMeasureSpec(max, MeasureSpec.AT_MOST))
+            }
+        }.apply {
             addView(buttons)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.9f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }.also { panel = it })
         answerView = TextView(this).apply { textSize = 18f; setTextColor(0xFF000000.toInt()); setBackgroundColor(0xFFFFFFE0.toInt()); setPadding(12, 8, 12, 8); setTextIsSelectable(true); text = "AI answers appear here (big text, you can select and copy).\n" }
         answerScroll = ScrollView(this).apply {
             addView(answerView)
             setBackgroundColor(0xFFFFFFE0.toInt())
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 2.6f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.5f)
         }
         root.addView(answerScroll)
         root.addView(scroll)
