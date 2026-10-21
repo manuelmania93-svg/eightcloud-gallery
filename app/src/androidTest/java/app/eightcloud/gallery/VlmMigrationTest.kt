@@ -17,7 +17,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class VlmMigrationTest {
     @Test
-    fun upgradeFrom12KeepsDataAndCreatesVlmTable() = runBlocking {
+    fun upgradeFrom12KeepsDataAndCreatesVlmTable() { runBlocking {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val name = "mig-test.db"
         ctx.deleteDatabase(name)
@@ -38,5 +38,5 @@ class VlmMigrationTest {
         assertEquals("cartoon bear", rows[0].description)
         db2.close()
         ctx.deleteDatabase(name)
-    }
+    } }
 }
