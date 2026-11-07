@@ -71,7 +71,19 @@ class UpdateFlowTest {
     @Before
     fun setUp() {
         evidenceDir.mkdirs()
-        server = FixtureServer().also { it.start() }
+        try {
+            server = FixtureServer().also { it.start() }
+        } catch (e: java.net.SocketException) {
+            val ctx = InstrumentationRegistry.getInstrumentation().context
+            val perm = ctx.packageManager.checkPermission(
+                android.Manifest.permission.INTERNET, ctx.packageName,
+            )
+            throw AssertionError(
+                "fixture server bind failed (INTERNET granted to test apk: " +
+                    (perm == android.content.pm.PackageManager.PERMISSION_GRANTED) + ")",
+                e,
+            )
+        }
         AppUpdate.latestReleaseUrlOverride = server.base + "/release.json"
         AppUpdate.allowedApkUrlPrefixOverride = server.base + "/"
     }
@@ -223,7 +235,9 @@ class UpdateFlowTest {
         val base: String get() = "http://127.0.0.1:${socket!!.localPort}"
 
         fun start() {
-            socket = ServerSocket(0)
+            // Bind IPv4 loopback explicitly: the CI emulator (API 29) can refuse the
+            // default dual-stack any-address bind with EPERM even when INTERNET is held.
+            socket = ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
             running = true
             thread(isDaemon = true) {
                 while (running) {
