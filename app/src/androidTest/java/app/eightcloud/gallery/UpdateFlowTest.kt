@@ -16,11 +16,6 @@ import androidx.test.uiautomator.Until
 import app.eightcloud.gallery.data.AppUpdate
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.io.FileOutputStream
-import java.io.OutputStream
-import java.net.ServerSocket
-import java.security.MessageDigest
-import kotlin.concurrent.thread
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,10 +30,12 @@ import org.junit.runner.RunWith
 
 /**
  * On-device A->B update handoff fixture, fully isolated on the emulator:
- * a loopback HTTP server serves the release manifest and candidate APKs (built by CI
- * with the stable key), and the real updater UI is driven through check -> download ->
- * verify -> system install sheet. Rejection paths (bad sha256, wrong signer, not newer,
- * wrong package) must refuse and delete the staged file.
+ * CI serves the release manifests and candidate APKs (built with the stable key) from
+ * a HOST-side HTTP server, bridged to the emulator's loopback via `adb reverse` - a
+ * guest-side ServerSocket is not possible on the CI emulator (bind EPERMs even with
+ * INTERNET granted). The real updater UI is driven through check -> download -> verify
+ * -> system install sheet. Rejection paths (bad sha256, wrong signer, not newer, wrong
+ * package) must refuse and delete the staged file.
  *
  * APK A = the installed app under test (versionCode 2, stable key).
  * b.apk = candidate B (versionCode 3, stable key); c.apk = B re-signed with a throwaway key.
@@ -59,47 +56,26 @@ class UpdateFlowTest {
         .outerRule(GrantPermissionRule.grant(*mediaPermissions))
         .around(composeRule)
 
-    private lateinit var server: FixtureServer
     private val evidenceDir = File("/sdcard/update-evidence")
 
-    private fun assetBytes(name: String): ByteArray =
-        InstrumentationRegistry.getInstrumentation().context.assets.open("update-fixtures/$name").use { it.readBytes() }
-
-    private fun sha256Hex(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    // Host-side fixture server (see the android-test CI job), bridged by adb reverse.
+    private val fixtureBase = "http://127.0.0.1:8799"
 
     @Before
     fun setUp() {
         evidenceDir.mkdirs()
-        try {
-            server = FixtureServer().also { it.start() }
-        } catch (e: java.net.SocketException) {
-            val ctx = InstrumentationRegistry.getInstrumentation().context
-            val perm = ctx.packageManager.checkPermission(
-                android.Manifest.permission.INTERNET, ctx.packageName,
-            )
-            throw AssertionError(
-                "fixture server bind failed (INTERNET granted to test apk: " +
-                    (perm == android.content.pm.PackageManager.PERMISSION_GRANTED) + ")",
-                e,
-            )
-        }
-        AppUpdate.latestReleaseUrlOverride = server.base + "/release.json"
-        AppUpdate.allowedApkUrlPrefixOverride = server.base + "/"
+        AppUpdate.allowedApkUrlPrefixOverride = "$fixtureBase/"
     }
 
     @After
     fun tearDown() {
         AppUpdate.latestReleaseUrlOverride = null
         AppUpdate.allowedApkUrlPrefixOverride = null
-        if (::server.isInitialized) server.stop()
     }
 
-    private fun serveCandidate(apkAsset: String, versionCode: Long, sha: String) {
-        server.routes["/release.json"] = """{"assets":[{"name":"8cloud-update.json","browser_download_url":"${server.base}/8cloud-update.json"}]}"""
-        server.routes["/8cloud-update.json"] =
-            """{"versionCode":$versionCode,"versionName":"0.15.0","apkUrl":"${server.base}/$apkAsset","sha256":"$sha"}"""
-        server.routes["/$apkAsset"] = assetBytes(apkAsset)
+    /** Point the updater at one of the CI-staged release manifests (release-<scenario>.json). */
+    private fun useFixture(scenario: String) {
+        AppUpdate.latestReleaseUrlOverride = "$fixtureBase/release-$scenario.json"
     }
 
     private fun shot(name: String) {
@@ -136,7 +112,7 @@ class UpdateFlowTest {
         val installedBefore = target.packageManager.getPackageInfo(target.packageName, 0).longVersionCode
         assertEquals("fixture A is versionCode 2", 2L, installedBefore)
 
-        serveCandidate("b.apk", 3, sha256Hex(assetBytes("b.apk")))
+        useFixture("good")
 
         // Grid banner proves silent once-per-process discovery found the update.
         waitText("Update available: 0.15.0")
@@ -176,7 +152,7 @@ class UpdateFlowTest {
 
     @Test
     fun rejectsBadSha256() {
-        serveCandidate("b.apk", 3, "0".repeat(64))
+        useFixture("badsha")
         val info = runBlocking { AppUpdate.fetchLatest() }
         assertNotNull(info)
         val target = InstrumentationRegistry.getInstrumentation().targetContext
@@ -192,7 +168,7 @@ class UpdateFlowTest {
 
     @Test
     fun rejectsWrongSigner() {
-        serveCandidate("c.apk", 3, sha256Hex(assetBytes("c.apk")))
+        useFixture("wrongsig")
         val info = runBlocking { AppUpdate.fetchLatest() }
         assertNotNull(info)
         val target = InstrumentationRegistry.getInstrumentation().targetContext
@@ -208,7 +184,7 @@ class UpdateFlowTest {
     @Test
     fun rejectsNotNewer() {
         // Installed fixture A is versionCode 2; a manifest at 2 is never offered.
-        serveCandidate("b.apk", 2, sha256Hex(assetBytes("b.apk")))
+        useFixture("old")
         val info = runBlocking { AppUpdate.fetchLatest() }
         assertNotNull(info)
         val target = InstrumentationRegistry.getInstrumentation().targetContext
@@ -227,48 +203,4 @@ class UpdateFlowTest {
         )
     }
 
-    /** Minimal loopback HTTP fixture: exact-path routes to UTF-8 strings or bytes. */
-    private class FixtureServer {
-        val routes = HashMap<String, Any>()
-        private var socket: ServerSocket? = null
-        private var running = false
-        val base: String get() = "http://127.0.0.1:${socket!!.localPort}"
-
-        fun start() {
-            // Bind IPv4 loopback explicitly: the CI emulator (API 29) can refuse the
-            // default dual-stack any-address bind with EPERM even when INTERNET is held.
-            socket = ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
-            running = true
-            thread(isDaemon = true) {
-                while (running) {
-                    try {
-                        socket!!.accept().use { conn ->
-                            val line = conn.getInputStream().bufferedReader().readLine() ?: return@use
-                            val path = line.removePrefix("GET ").substringBefore(' ').substringBefore('?')
-                            val body = routes[path]
-                            val out: OutputStream = conn.getOutputStream()
-                            if (body == null) {
-                                out.write("HTTP/1.0 404\r\nContent-Length: 0\r\n\r\n".toByteArray())
-                            } else {
-                                val bytes = when (body) {
-                                    is ByteArray -> body
-                                    else -> body.toString().toByteArray(Charsets.UTF_8)
-                                }
-                                out.write("HTTP/1.0 200\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
-                                out.write(bytes)
-                            }
-                            out.flush()
-                        }
-                    } catch (_: Exception) {
-                        if (!running) break
-                    }
-                }
-            }
-        }
-
-        fun stop() {
-            running = false
-            socket?.close()
-        }
-    }
 }

@@ -74,19 +74,36 @@ jobs:
           echo "EIGHTCLOUD_KEYSTORE_PATH=$RUNNER_TEMP/8cloud-signing.p12" >> "$GITHUB_ENV"
           printf 'EIGHTCLOUD_KEYSTORE_PASSWORD=%s\n' "$EIGHTCLOUD_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           printf 'EIGHTCLOUD_KEY_ALIAS=%s\n' "$EIGHTCLOUD_KEY_ALIAS" >> "$GITHUB_ENV"
-      - name: Stage A->B update fixture APKs
+      - name: Stage A->B update fixture APKs + manifests
         run: |
           set -euo pipefail
-          FIX=app/build/updateFixtures/assets/update-fixtures
+          FIX=srv/update-fixtures
           mkdir -p "$FIX"
           # Candidate B: versionCode 3, stable key (the update the test installs).
           ./gradlew assembleDebug -PeightcloudVersionCode=3 --stacktrace
           cp app/build/outputs/apk/debug/app-debug.apk "$FIX/b.apk"
           # Candidate C: same bytes re-signed with a throwaway key - must be rejected.
-          keytool -genkeypair -alias throwaway -keyalg RSA -keysize 2048 -validity 365             -keystore "$RUNNER_TEMP/throwaway.p12" -storetype PKCS12             -storepass throwaway-pass -keypass throwaway-pass -dname "CN=throwaway"
+          keytool -genkeypair -alias throwaway -keyalg RSA -keysize 2048 -validity 365 \
+            -keystore "$RUNNER_TEMP/throwaway.p12" -storetype PKCS12 \
+            -storepass throwaway-pass -keypass throwaway-pass -dname "CN=throwaway"
           cp "$FIX/b.apk" "$FIX/c.apk"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$RUNNER_TEMP/throwaway.p12"             --ks-pass pass:throwaway-pass --key-pass pass:throwaway-pass "$FIX/c.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$RUNNER_TEMP/throwaway.p12" \
+            --ks-pass pass:throwaway-pass --key-pass pass:throwaway-pass "$FIX/c.apk"
           rm -f "$RUNNER_TEMP/throwaway.p12"
+          # Static release manifests, served by the host-side fixture server below.
+          # The guest never binds a socket (CI emulator refuses ServerSocket with EPERM).
+          BASE=http://127.0.0.1:8799
+          B_SHA=$(sha256sum "$FIX/b.apk" | cut -d' ' -f1)
+          C_SHA=$(sha256sum "$FIX/c.apk" | cut -d' ' -f1)
+          BAD_SHA=$(printf '0%.0s' $(seq 64))
+          for s in good badsha old wrongsig; do
+            printf '{"assets":[{"name":"8cloud-update.json","browser_download_url":"%s/manifest-%s.json"}]}' \
+              "$BASE" "$s" > "$FIX/release-$s.json"
+          done
+          printf '{"versionCode":3,"versionName":"0.15.0","apkUrl":"%s/b.apk","sha256":"%s"}' "$BASE" "$B_SHA" > "$FIX/manifest-good.json"
+          printf '{"versionCode":3,"versionName":"0.15.0","apkUrl":"%s/b.apk","sha256":"%s"}' "$BASE" "$BAD_SHA" > "$FIX/manifest-badsha.json"
+          printf '{"versionCode":2,"versionName":"0.15.0","apkUrl":"%s/b.apk","sha256":"%s"}' "$BASE" "$B_SHA" > "$FIX/manifest-old.json"
+          printf '{"versionCode":3,"versionName":"0.15.0","apkUrl":"%s/c.apk","sha256":"%s"}' "$BASE" "$C_SHA" > "$FIX/manifest-wrongsig.json"
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -100,7 +117,15 @@ jobs:
           arch: x86_64
           profile: Nexus 6
           # Fixture A installs at versionCode 2; the update test installs B (3) over it.
-          script: ./gradlew connectedDebugAndroidTest -PeightcloudVersionCode=2 --stacktrace
+          # The fixtures are served from the HOST; adb reverse bridges the emulator's
+          # loopback to it, so the guest never binds a socket (EPERM on this emulator).
+          script: |
+            python3 -m http.server 8799 --directory srv/update-fixtures &
+            SERVER_PID=$!
+            trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+            sleep 1
+            adb -s emulator-5554 reverse tcp:8799 tcp:8799
+            ./gradlew connectedDebugAndroidTest -PeightcloudVersionCode=2 --stacktrace
       - name: Pull update-flow evidence
         if: always()
         run: |

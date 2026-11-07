@@ -60,11 +60,6 @@ android {
     buildFeatures {
         compose true
     }
-    sourceSets {
-        // CI stages the A->B update fixture APKs here before assembleDebugAndroidTest;
-        // the directory is empty in local checkouts (tests needing it run in CI).
-        androidTest.assets.srcDir("${buildDir}/updateFixtures/assets")
-    }
     testOptions {
         unitTests.returnDefaultValues = true
     }

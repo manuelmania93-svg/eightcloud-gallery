@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- The generated test APK does NOT inherit the app-under-test manifest: without
-     this, the in-process loopback FixtureServer (ServerSocket) dies with
-     SecurityException in setUp and the real failure is masked by tearDown. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
-</manifest>
