@@ -55,6 +55,11 @@ object AppUpdate {
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 15_000
 
+    // Test hooks for the on-device A->B handoff fixture: androidTest points the updater
+    // at a local fixture server. Never set in production code paths.
+    internal var latestReleaseUrlOverride: String? = null
+    internal var allowedApkUrlPrefixOverride: String? = null
+
     fun currentVersionCode(context: Context): Long {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
@@ -87,7 +92,7 @@ object AppUpdate {
         val m = JSONObject(manifestJson)
         val apkUrl = m.getString("apkUrl")
         val sha256 = m.getString("sha256").lowercase()
-        require(apkUrl.startsWith(RELEASE_DOWNLOAD_PREFIX)) { "unexpected apkUrl" }
+        require(apkUrl.startsWith(allowedApkUrlPrefixOverride ?: RELEASE_DOWNLOAD_PREFIX)) { "unexpected apkUrl" }
         require(sha256.matches(Regex("[0-9a-f]{64}"))) { "bad sha256" }
         UpdateInfo(
             versionCode = m.getLong("versionCode"),
@@ -104,7 +109,7 @@ object AppUpdate {
      */
     suspend fun fetchLatest(): UpdateInfo? = withContext(Dispatchers.IO) {
         runCatching {
-            val manifestUrl = findAssetUrl(get(LATEST_RELEASE_URL), MANIFEST_ASSET_NAME) ?: return@runCatching null
+            val manifestUrl = findAssetUrl(get(latestReleaseUrlOverride ?: LATEST_RELEASE_URL), MANIFEST_ASSET_NAME) ?: return@runCatching null
             parseManifest(get(manifestUrl))
         }.getOrNull()
     }

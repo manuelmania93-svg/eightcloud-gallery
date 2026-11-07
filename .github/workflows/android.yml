@@ -58,7 +58,35 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-34 build-tools;35.0.0
       - uses: gradle/actions/setup-gradle@v4
+      - name: Restore stable signing key
+        env:
+          EIGHTCLOUD_KEYSTORE_BASE64: ${{ secrets.EIGHTCLOUD_KEYSTORE_BASE64 }}
+          EIGHTCLOUD_KEYSTORE_PASSWORD: ${{ secrets.EIGHTCLOUD_KEYSTORE_PASSWORD }}
+          EIGHTCLOUD_KEY_ALIAS: ${{ secrets.EIGHTCLOUD_KEY_ALIAS }}
+        run: |
+          test -n "$EIGHTCLOUD_KEYSTORE_BASE64" && test -n "$EIGHTCLOUD_KEYSTORE_PASSWORD" && test -n "$EIGHTCLOUD_KEY_ALIAS"
+          umask 077
+          printf '%s' "$EIGHTCLOUD_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/8cloud-signing.p12"
+          echo "EIGHTCLOUD_KEYSTORE_PATH=$RUNNER_TEMP/8cloud-signing.p12" >> "$GITHUB_ENV"
+          printf 'EIGHTCLOUD_KEYSTORE_PASSWORD=%s\n' "$EIGHTCLOUD_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          printf 'EIGHTCLOUD_KEY_ALIAS=%s\n' "$EIGHTCLOUD_KEY_ALIAS" >> "$GITHUB_ENV"
+      - name: Stage A->B update fixture APKs
+        run: |
+          set -euo pipefail
+          FIX=app/build/updateFixtures/assets/update-fixtures
+          mkdir -p "$FIX"
+          # Candidate B: versionCode 3, stable key (the update the test installs).
+          ./gradlew assembleDebug -PeightcloudVersionCode=3 --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk "$FIX/b.apk"
+          # Candidate C: same bytes re-signed with a throwaway key - must be rejected.
+          keytool -genkeypair -alias throwaway -keyalg RSA -keysize 2048 -validity 365             -keystore "$RUNNER_TEMP/throwaway.p12" -storetype PKCS12             -storepass throwaway-pass -keypass throwaway-pass -dname "CN=throwaway"
+          cp "$FIX/b.apk" "$FIX/c.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$RUNNER_TEMP/throwaway.p12"             --ks-pass pass:throwaway-pass --key-pass pass:throwaway-pass "$FIX/c.apk"
+          rm -f "$RUNNER_TEMP/throwaway.p12"
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -71,7 +99,20 @@ jobs:
           target: default
           arch: x86_64
           profile: Nexus 6
-          script: ./gradlew connectedDebugAndroidTest --stacktrace
+          # Fixture A installs at versionCode 2; the update test installs B (3) over it.
+          script: ./gradlew connectedDebugAndroidTest -PeightcloudVersionCode=2 --stacktrace
+      - name: Pull update-flow evidence
+        if: always()
+        run: |
+          adb pull /sdcard/update-evidence/ update-evidence/ || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-flow-evidence
+          path: update-evidence/
+      - name: Remove runner signing-key copy
+        if: always()
+        run: rm -f "$RUNNER_TEMP/8cloud-signing.p12"
 
   publish:
     name: Publish release
