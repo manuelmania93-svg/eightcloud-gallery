@@ -11,14 +11,40 @@ android {
         applicationId "app.eightcloud.gallery"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "0.1.0"
+        // CI stamps versionCode from the Actions run number (-PeightcloudVersionCode=N)
+        // so every published build is strictly newer - the in-app updater compares
+        // versionCode, not versionName. max() with the source floor matters: if CI run
+        // numbering ever resets (workflow recreated, repo forked), raising this floor
+        // above the last published versionCode keeps updates flowing instead of stalling
+        // below the installed base (installed builds up to v0.14.1-m2-pre carry code 1).
+        def stampedVersionCode = (project.findProperty('eightcloudVersionCode') ?: '0') as int
+        versionCode Math.max(stampedVersionCode, 2)
+        // Semantic version. Every merge intended to produce a release bumps this (minor
+        // for features, patch for fixes); the publish job skips cleanly when the tag
+        // exists, so merges without a bump intentionally publish nothing.
+        versionName "0.15.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (System.getenv("EIGHTCLOUD_KEYSTORE_PATH")) {
+            stable {
+                storeFile file(System.getenv("EIGHTCLOUD_KEYSTORE_PATH"))
+                storePassword System.getenv("EIGHTCLOUD_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("EIGHTCLOUD_KEY_ALIAS")
+                keyPassword System.getenv("EIGHTCLOUD_KEYSTORE_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         debug {
             applicationIdSuffix ".debug"
+            // When CI restores the stable key, the debug variant (the shipped package
+            // app.eightcloud.gallery.debug) is signed with it; local builds keep the
+            // per-machine debug key.
+            if (System.getenv("EIGHTCLOUD_KEYSTORE_PATH")) {
+                signingConfig signingConfigs.stable
+            }
         }
         release {
             minifyEnabled false

@@ -17,15 +17,37 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           validate-wrappers: true
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-34 build-tools;35.0.0
+      - name: Restore stable signing key
+        env:
+          EIGHTCLOUD_KEYSTORE_BASE64: ${{ secrets.EIGHTCLOUD_KEYSTORE_BASE64 }}
+          EIGHTCLOUD_KEYSTORE_PASSWORD: ${{ secrets.EIGHTCLOUD_KEYSTORE_PASSWORD }}
+          EIGHTCLOUD_KEY_ALIAS: ${{ secrets.EIGHTCLOUD_KEY_ALIAS }}
+        run: |
+          test -n "$EIGHTCLOUD_KEYSTORE_BASE64" && test -n "$EIGHTCLOUD_KEYSTORE_PASSWORD" && test -n "$EIGHTCLOUD_KEY_ALIAS"
+          umask 077
+          printf '%s' "$EIGHTCLOUD_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/8cloud-signing.p12"
+          echo "EIGHTCLOUD_KEYSTORE_PATH=$RUNNER_TEMP/8cloud-signing.p12" >> "$GITHUB_ENV"
+          printf 'EIGHTCLOUD_KEYSTORE_PASSWORD=%s\n' "$EIGHTCLOUD_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          printf 'EIGHTCLOUD_KEY_ALIAS=%s\n' "$EIGHTCLOUD_KEY_ALIAS" >> "$GITHUB_ENV"
+      # versionCode is stamped from the run number so every published build is strictly
+      # newer than the last - the in-app updater compares versionCode, not versionName.
       - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest -PeightcloudVersionCode=${{ github.run_number }} --stacktrace
       - name: Assemble debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug -PeightcloudVersionCode=${{ github.run_number }} --stacktrace
+      - name: Publish-script fixture tests
+        run: bash .github/scripts/publish-release-test.sh
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Remove runner signing-key copy
+        if: always()
+        run: rm -f "$RUNNER_TEMP/8cloud-signing.p12"
 
   android-test:
     name: App-start smoke test (emulator)
@@ -50,3 +72,39 @@ jobs:
           arch: x86_64
           profile: Nexus 6
           script: ./gradlew connectedDebugAndroidTest --stacktrace
+
+  publish:
+    name: Publish release
+    # Gated automatic release on the exact main head. Merging to main still requires
+    # the user's explicit OK (standing rule); this job only runs after such a merge.
+    # Dispatch runs never publish. Nothing is ever deleted or overwritten: existing
+    # releases/assets are preserved (see .github/scripts/publish-release.sh gates).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build, android-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      checks: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BUILD_CHECK_NAME: Build debug APK + unit tests
+      EXPECTED_CERT_SHA256: 501ffd102c711f96d8c3e196225167f14b58276c6e7fb462b58f301b2cc493e1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-34 build-tools;35.0.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-debug-apk
+          path: apk
+      - name: Gate and publish
+        run: bash .github/scripts/publish-release.sh apk/app-debug.apk
