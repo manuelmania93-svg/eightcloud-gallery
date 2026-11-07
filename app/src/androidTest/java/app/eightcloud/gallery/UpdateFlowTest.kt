@@ -80,7 +80,7 @@ class UpdateFlowTest {
     fun tearDown() {
         AppUpdate.latestReleaseUrlOverride = null
         AppUpdate.allowedApkUrlPrefixOverride = null
-        server.stop()
+        if (::server.isInitialized) server.stop()
     }
 
     private fun serveCandidate(apkAsset: String, versionCode: Long, sha: String) {
