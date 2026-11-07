@@ -26,6 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.eightcloud.gallery.ui.EightCloudTheme
@@ -71,6 +75,17 @@ fun EightCloudApp() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         viewModel.setPermissionGranted(result.values.any { it })
+    }
+
+    // In-app update: one silent check per process start; offline or no manifest shows nothing.
+    LaunchedEffect(Unit) { viewModel.checkForUpdateOnce() }
+    val updateLifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(updateLifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.onResumeAfterGrant()
+        }
+        updateLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { updateLifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     EightCloudTheme(themeMode) {

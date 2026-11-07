@@ -18,14 +18,17 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.eightcloud.gallery.data.MediaSort
+import app.eightcloud.gallery.data.UpdateState
 import app.eightcloud.gallery.data.SortField
 import kotlin.math.roundToInt
 
@@ -36,6 +39,7 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
     val sortField by viewModel.sortField.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
+    val updateState by viewModel.updateState.collectAsState()
 
     BackHandler { viewModel.backToGrid() }
 
@@ -105,6 +109,40 @@ fun SettingsScreen(viewModel: GalleryViewModel) {
             sortChoice("System", themeMode == ThemeMode.SYSTEM) { viewModel.setThemeMode(ThemeMode.SYSTEM) }
             sortChoice("Light", themeMode == ThemeMode.LIGHT) { viewModel.setThemeMode(ThemeMode.LIGHT) }
             sortChoice("Dark", themeMode == ThemeMode.DARK) { viewModel.setThemeMode(ThemeMode.DARK) }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+            Text("App update", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Installed: ${viewModel.installedVersionName} (${viewModel.installedVersionCode})",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            when (val state = updateState) {
+                UpdateState.Idle -> updateAction("Check for updates", "update_check") { viewModel.checkForUpdate(silent = false) }
+                UpdateState.Checking -> updateStatus("Checking for updates...")
+                UpdateState.UpToDate -> {
+                    updateStatus("You're on the latest version.")
+                    updateAction("Check again", "update_check") { viewModel.checkForUpdate(silent = false) }
+                }
+                is UpdateState.Available -> {
+                    updateStatus("Update available: ${state.info.versionName} (${state.info.versionCode})")
+                    updateAction("Download update", "update_download") { viewModel.downloadUpdate() }
+                }
+                is UpdateState.Downloading -> updateStatus("Downloading update... ${state.percent}%")
+                is UpdateState.ReadyToInstall -> {
+                    updateStatus("Update ready to install.")
+                    updateAction("Install update", "update_install") { viewModel.installUpdate() }
+                }
+                is UpdateState.Failed -> {
+                    updateStatus(
+                        if (state.info == null) "Couldn't check for updates. Check your connection."
+                        else "Update failed. The download could not be verified, so nothing was installed."
+                    )
+                    updateAction("Try again", "update_check") { viewModel.checkForUpdate(silent = false) }
+                }
+            }
         }
     }
 }
@@ -120,4 +158,26 @@ private fun sortChoice(label: String, selected: Boolean, onClick: () -> Unit) {
         RadioButton(selected = selected, onClick = onClick)
         Text(label, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+@Composable
+private fun updateAction(label: String, tag: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .testTag(tag)
+    ) {
+        Text(label)
+    }
+}
+
+@Composable
+private fun updateStatus(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp)
+    )
 }

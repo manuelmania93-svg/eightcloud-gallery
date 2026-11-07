@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -42,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -49,6 +52,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.eightcloud.gallery.data.DetailsLoader
+import app.eightcloud.gallery.data.UpdateState
 import app.eightcloud.gallery.data.MediaItem
 import app.eightcloud.gallery.data.MediaSort
 import app.eightcloud.gallery.data.SortField
@@ -89,6 +93,7 @@ fun GridScreen(viewModel: GalleryViewModel) {
     val sortAscending by viewModel.sortAscending.collectAsState()
     val favoritesOnly by viewModel.favoritesOnly.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
+    val updateState by viewModel.updateState.collectAsState()
     var sortMenuOpen by remember { mutableStateOf(false) }
     var zoomAccumulator by remember { mutableStateOf(1f) }
 
@@ -138,11 +143,27 @@ fun GridScreen(viewModel: GalleryViewModel) {
             )
         }
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            when (val state = updateState) {
+                is UpdateState.Available -> updateBanner(
+                    "Update available: ${state.info.versionName}. Tap to download.",
+                    "update_banner_available"
+                ) { viewModel.downloadUpdate() }
+                is UpdateState.Downloading -> updateBanner(
+                    "Downloading update... ${state.percent}%",
+                    "update_banner_downloading"
+                ) {}
+                is UpdateState.ReadyToInstall -> updateBanner(
+                    "Update ready. Tap to install.",
+                    "update_banner_ready"
+                ) { viewModel.installUpdate() }
+                else -> {}
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 items.isEmpty() -> Text(
@@ -204,7 +225,26 @@ fun GridScreen(viewModel: GalleryViewModel) {
                     }
                 }
             }
+            }
         }
+    }
+}
+
+@Composable
+private fun updateBanner(text: String, tag: String, onClick: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .testTag(tag)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+        )
     }
 }
 
