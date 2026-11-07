@@ -111,6 +111,10 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Run smoke test on emulator
         uses: reactivecircus/android-emulator-runner@v2
+        # Hard envelope: a hung instrumentation (e.g. after the A->B install replaces the
+        # app under test) must fail the step so the evidence steps below still run,
+        # instead of blocking the job forever.
+        timeout-minutes: 30
         with:
           api-level: 29
           target: default
@@ -125,11 +129,12 @@ jobs:
             trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
             sleep 1
             adb -s emulator-5554 reverse tcp:8799 tcp:8799
-            ./gradlew connectedDebugAndroidTest -PeightcloudVersionCode=2 --stacktrace
+            timeout 22m ./gradlew connectedDebugAndroidTest -PeightcloudVersionCode=2 --stacktrace
       - name: Pull update-flow evidence
         if: always()
         run: |
           adb pull /sdcard/update-evidence/ update-evidence/ || true
+          adb logcat -d > update-evidence/logcat.txt 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

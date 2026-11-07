@@ -27,6 +27,8 @@ import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.rules.TestRule
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
+import org.junit.FixMethodOrder
 
 /**
  * On-device A->B update handoff fixture, fully isolated on the emulator:
@@ -41,6 +43,9 @@ import org.junit.runner.RunWith
  * b.apk = candidate B (versionCode 3, stable key); c.apk = B re-signed with a throwaway key.
  */
 @RunWith(AndroidJUnit4::class)
+// The A->B install replaces the app under instrumentation and kills its process;
+// run it LAST so no later rule cleanup or test can hang on the dead activity.
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class UpdateFlowTest {
 
     private val composeRule = createAndroidComposeRule<MainActivity>()
@@ -107,7 +112,7 @@ class UpdateFlowTest {
     }
 
     @Test
-    fun updateFlow_installsVerifiedNewerApk() {
+    fun zz_last_installsVerifiedNewerApk() {
         val target = InstrumentationRegistry.getInstrumentation().targetContext
         val installedBefore = target.packageManager.getPackageInfo(target.packageName, 0).longVersionCode
         assertEquals("fixture A is versionCode 2", 2L, installedBefore)
