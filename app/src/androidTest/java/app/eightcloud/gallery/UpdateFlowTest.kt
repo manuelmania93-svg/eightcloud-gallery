@@ -95,6 +95,17 @@ class UpdateFlowTest {
         device.takeScreenshot(File(evidenceDir, "$name.png"))
     }
 
+    private fun waitAnyText(device: UiDevice, timeoutMs: Long, vararg texts: String): androidx.test.uiautomator.UiObject2? {
+        val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            for (t in texts) {
+                device.findObject(By.text(t))?.let { return it }
+            }
+            Thread.sleep(250)
+        }
+        return null
+    }
+
     private fun waitTag(tag: String, timeoutMs: Long = 30_000) {
         composeRule.waitUntil(timeoutMs) {
             composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
@@ -136,11 +147,13 @@ class UpdateFlowTest {
             shot("unknown-sources-grant")
             device.pressBack()
         }
-        val sheet = device.wait(Until.findObject(By.textMatches("(?i)update")), 15_000)
+        // System installer button casing varies by API level ("Update" vs "UPDATE"),
+        // so poll exact variants instead of relying on a regex selector.
+        val sheet = waitAnyText(device, 15_000, "Update", "UPDATE")
         assertNotNull("system install sheet shows UPDATE", sheet)
         shot("system-install-sheet")
         sheet!!.click()
-        val done = device.wait(Until.findObject(By.textMatches("(?i)(done|app updated)")), 60_000)
+        val done = waitAnyText(device, 60_000, "Done", "DONE", "App updated", "APP UPDATED", "UPDATED")
         assertNotNull("install completed", done)
         shot("install-done")
         done!!.click()
