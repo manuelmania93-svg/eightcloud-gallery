@@ -146,7 +146,8 @@ jobs:
             case "$f" in *:*|*/*|"") continue;; esac
             timeout 30 adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug cat "files/update-evidence/$f" > "update-evidence/$f" 2>/dev/null || true
           done
-          timeout 60 adb -s emulator-5554 logcat -d > update-evidence/logcat.txt 2>/dev/null || true
+          timeout 60 adb -s emulator-5554 logcat -d > update-evidence/logcat-pull.txt 2>/dev/null || true
+          [ -s update-evidence/logcat-pull.txt ] || rm -f update-evidence/logcat-pull.txt
           ls -la update-evidence/ || true
           find update-evidence -name '*:*' -delete
           # Console redundancy: if artifact upload fails again the evidence survives in the run log.

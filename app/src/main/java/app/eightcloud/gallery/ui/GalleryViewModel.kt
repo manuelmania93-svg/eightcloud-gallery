@@ -189,17 +189,24 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             else -> null
         } ?: return
         viewModelScope.launch {
+            AppUpdate.trace("download entry vc=${info.versionCode} url=${info.apkUrl}")
             _updateState.value = UpdateState.Downloading(info, 0)
             _updateState.value = runCatching {
                 AppUpdate.download(getApplication(), info) { percent ->
+                    if (percent % 25 == 0) AppUpdate.trace("download progress $percent%")
                     _updateState.value = UpdateState.Downloading(info, percent)
                 }
             }.fold(
                 onSuccess = { apk ->
-                    if (AppUpdate.verifyApk(getApplication(), apk, installedVersionCode)) UpdateState.ReadyToInstall(info, apk)
+                    val verified = AppUpdate.verifyApk(getApplication(), apk, installedVersionCode)
+                    AppUpdate.trace("download exit ok bytes=${apk.length()} verified=$verified")
+                    if (verified) UpdateState.ReadyToInstall(info, apk)
                     else UpdateState.Failed(info)
                 },
-                onFailure = { UpdateState.Failed(info) },
+                onFailure = {
+                    AppUpdate.trace("download exit error ${it.javaClass.simpleName}: ${it.message}")
+                    UpdateState.Failed(info)
+                },
             )
         }
     }

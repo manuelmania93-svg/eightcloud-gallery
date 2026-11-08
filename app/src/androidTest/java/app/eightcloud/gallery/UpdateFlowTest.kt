@@ -284,7 +284,17 @@ class UpdateFlowTest {
         }
         shot("settings-update-available")
         composeRule.onNodeWithTag("update_download").performClick()
-        waitTag("update_install")
+        // The fixture APK is ~9.7MB over adb reverse, which can be slow on CI; allow
+        // 120s. On timeout, capture the screen + tree so we can tell a stalled
+        // Downloading row from a Failed row (bad digest / rejected signature).
+        try {
+            waitTag("update_install", 120_000)
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            shot("settings-no-install")
+            dumpTrace("-noinstall")
+            throw AssertionError("download never reached update_install; " +
+                "tree: " + describeTree() + "; " + diagShort(), e)
+        }
         shot("settings-ready-to-install")
         composeRule.onNodeWithTag("update_install").performClick()
         // First update needs the one-time unknown-sources grant; the app then re-prompts
