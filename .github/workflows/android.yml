@@ -52,6 +52,10 @@ jobs:
   android-test:
     name: App-start smoke test (emulator)
     runs-on: ubuntu-latest
+    # Job-level bound: even if a step's own timeout misses, the job cannot hang
+    # beyond this (run 42430352606: an unbounded adb in the evidence step blocked
+    # on a dead emulator for 69 minutes).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -129,9 +133,12 @@ jobs:
             bash .github/scripts/run-update-tests.sh
       - name: Pull update-flow evidence
         if: always()
+        # Bounded + device-scoped: without -s and a timeout, a missing/dead
+        # emulator makes `adb logcat` wait for a device forever.
+        timeout-minutes: 3
         run: |
-          adb pull /sdcard/update-evidence/ update-evidence/ || true
-          adb logcat -d > update-evidence/logcat.txt 2>/dev/null || true
+          timeout 60 adb -s emulator-5554 pull /sdcard/update-evidence/ update-evidence/ || true
+          timeout 60 adb -s emulator-5554 logcat -d > update-evidence/logcat.txt 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
