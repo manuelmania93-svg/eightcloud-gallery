@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -242,20 +243,19 @@ class UpdateFlowTest {
         }
 
         useFixture("good")
-        // Run 42446867338 proved the tap node exists with an OnClick action but ZERO
-        // bounds (Rect.fromLTRB(0,0,0,0)) - composed, never laid out - and the semantics
-        // click silently no-ops on it. waitTag returns the moment the node EXISTS
-        // (composition), before any layout pass places it. Wait for PLACEMENT first.
+        // Root cause, proven by run 42450633898 (trace + pixel evidence): the settings
+        // screen is a Column with verticalScroll (SettingsScreen.kt:61), so every row is
+        // COMPOSED on open, but rows below the fold get clipped to ZERO boundsInRoot
+        // (semantics bounds are intersected with the scroll viewport). update_check sits
+        // under "Theme" - off-screen - so it existed with hasOnClick=true and bounds
+        // (0,0,0,0) and every semantics click silently no-oped. The screenshots showed
+        // the settings screen fully drawn with the row simply below the fold, and the
+        // keyguard trace showed locked=false. Scroll the row into view before clicking;
+        // performScrollTo drives the verticalScroll ancestor via ScrollBy.
         composeRule.waitForIdle()
-        val placedDeadline = android.os.SystemClock.uptimeMillis() + 10_000
-        var tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
-        while (tapNodes.firstOrNull()?.boundsInRoot?.let { it.width <= 0f || it.height <= 0f } != false
-            && android.os.SystemClock.uptimeMillis() < placedDeadline) {
-            AppUpdate.trace("tap-wait-placed: bounds=${tapNodes.map { it.boundsInRoot }}")
-            Thread.sleep(250)
-            composeRule.waitForIdle()
-            tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
-        }
+        composeRule.onNodeWithTag("update_check").performScrollTo()
+        composeRule.waitForIdle()
+        val tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
         AppUpdate.trace("tap-pre: nodes=${tapNodes.size} bounds=${tapNodes.map { it.boundsInRoot }} " +
             "roots=${composeRule.onAllNodes(androidx.compose.ui.test.isRoot(), useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }} " +
             "hasOnClick=${tapNodes.map { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnClick) != null }} " +
