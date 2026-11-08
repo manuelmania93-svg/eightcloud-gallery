@@ -295,7 +295,7 @@ object AppUpdate {
     }.getOrNull()
 
     @Suppress("DEPRECATION")
-    private fun firstSigner(info: PackageInfo): ByteArray? =
+    internal fun firstSigner(info: PackageInfo): ByteArray? =
         info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
             ?: info.signatures?.firstOrNull()?.toByteArray()
 

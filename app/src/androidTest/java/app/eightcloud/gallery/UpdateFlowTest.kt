@@ -371,6 +371,32 @@ class UpdateFlowTest {
     }
 
     @Test
+    fun signerFallsBackToLegacySignatures() {
+        // On the API 29 CI emulator, archive parsing left signingInfo null for a valid
+        // APK (run 42453757686); verifyApk must then read the legacy signatures array.
+        // The end-to-end accept path populated signingInfo once both flags were passed,
+        // so that run proved combined-flags verification but never executed the legacy
+        // branch itself. This test pins the branch directly: a PackageInfo with ONLY
+        // the legacy array populated must yield exactly that signer.
+        val target = InstrumentationRegistry.getInstrumentation().targetContext
+        @Suppress("DEPRECATION")
+        val own = target.packageManager.getPackageInfo(
+            target.packageName,
+            android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES or android.content.pm.PackageManager.GET_SIGNATURES,
+        )
+        @Suppress("DEPRECATION")
+        val legacyOnly = android.content.pm.PackageInfo().apply { signatures = own.signatures }
+        @Suppress("DEPRECATION")
+        val expected = own.signatures[0].toByteArray()
+        assertNotNull("installed package yields a signer", AppUpdate.firstSigner(own))
+        assertTrue(
+            "legacy signatures array is read when signingInfo is null",
+            AppUpdate.firstSigner(legacyOnly)!!.contentEquals(expected),
+        )
+        assertNull("no signatures anywhere means no signer", AppUpdate.firstSigner(android.content.pm.PackageInfo()))
+    }
+
+    @Test
     fun rejectsWrongPackage() {
         // The instrumentation APK itself: a real signed APK of a DIFFERENT package.
         val testApk = File(InstrumentationRegistry.getInstrumentation().context.packageCodePath)
