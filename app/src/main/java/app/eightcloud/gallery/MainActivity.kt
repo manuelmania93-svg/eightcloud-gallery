@@ -52,6 +52,11 @@ class MainActivity : ComponentActivity() {
             EightCloudApp()
         }
     }
+
+    override fun onDestroy() {
+        AppUpdate.trace("onDestroy isFinishing=$isFinishing")
+        super.onDestroy()
+    }
 }
 
 private fun requiredPermissions(): Array<String> = when {

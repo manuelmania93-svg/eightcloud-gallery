@@ -80,13 +80,15 @@ class UpdateFlowTest {
     @Before
     fun setUp() {
         evidenceDir.mkdirs()
+        testName = "unknown"
         AppUpdate.allowedApkUrlPrefixOverride = "$fixtureBase/"
     }
 
     @After
     fun tearDown() {
-        scenario?.close()
+        scenario?.close() // close first so the onDestroy trace lands in the dump
         scenario = null
+        dumpTrace("-end")
         AppUpdate.latestReleaseUrlOverride = null
         AppUpdate.allowedApkUrlPrefixOverride = null
     }
@@ -113,6 +115,7 @@ class UpdateFlowTest {
 
     @Test
     fun b_automaticDiscoveryShowsBanner() {
+        testName = "banner"
         // Automatic path, proven with ZERO tapping: the fixture is authoritative before
         // the activity exists, so the banner can only come from the startup silent check.
         useFixture("good")
@@ -121,8 +124,9 @@ class UpdateFlowTest {
             waitText("Update available: 0.15.0")
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("grid-banner-missing")
+            dumpTrace("-fail")
             throw AssertionError("startup silent check did not surface the grid banner; " +
-                "tree: " + describeTree() + "; " + diag(), e)
+                "tree: " + describeTree() + "; " + diagShort(), e)
         }
         shot("grid-banner-available")
     }
@@ -155,9 +159,25 @@ class UpdateFlowTest {
         }
     }
 
+    private var testName = "unknown"
+
+    // The console printer can eat long assertion payloads (run 42442949928 lost the whole
+    // trace block AND the stack frame), so the full trace + counters go to an evidence FILE
+    // that the driver pulls from /sdcard - a channel nothing in the console path can truncate.
+    private fun dumpTrace(suffix: String) {
+        try {
+            File(evidenceDir, "trace-$testName$suffix-${System.currentTimeMillis()}.txt").writeText(diag())
+        } catch (_: Exception) {
+        }
+    }
+
     private fun diag(): String =
         "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch} " +
         "creates=${AppUpdate.debugActivityCreates} screenVm=${AppUpdate.debugScreenVm} checkVm=${AppUpdate.debugLastCheckVm}\ntrace:\n" + AppUpdate.debugTrace.toString()
+
+    private fun diagShort(): String =
+        "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch} " +
+        "creates=${AppUpdate.debugActivityCreates} screenVm=${AppUpdate.debugScreenVm} checkVm=${AppUpdate.debugLastCheckVm}"
 
     // Every testTag + visible text in the unmerged semantics tree, for failure messages.
     private fun describeTree(): String {
@@ -176,6 +196,7 @@ class UpdateFlowTest {
 
     @Test
     fun handoffToSystemInstaller() {
+        testName = "handoff"
         // Manual path. The fixture is authoritative BEFORE launch: starting on the
         // NOT-newer manifest settles the startup silent check at Idle deterministically
         // (local fetch, no uncontrolled production URL), so the explicit tap below
@@ -195,8 +216,9 @@ class UpdateFlowTest {
             waitTag("update_check")
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-never-idle")
+            dumpTrace("-fail")
             throw AssertionError("startup check against the local fixture never settled to Idle; " +
-                "tree: " + describeTree() + "; " + diag(), e)
+                "tree: " + describeTree() + "; " + diagShort(), e)
         }
 
         useFixture("good")
@@ -206,8 +228,9 @@ class UpdateFlowTest {
             waitTag("update_download")
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-stuck-no-download")
+            dumpTrace("-fail")
             throw AssertionError("manual check never surfaced update_download; " +
-                "tree: " + describeTree() + "; " + diag(), e)
+                "tree: " + describeTree() + "; " + diagShort(), e)
         }
         shot("settings-update-available")
         composeRule.onNodeWithTag("update_download").performClick()

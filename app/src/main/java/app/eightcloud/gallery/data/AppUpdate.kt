@@ -73,9 +73,11 @@ object AppUpdate {
     // Timestamped event trace of the whole check path (test-only diagnostics).
     internal val debugTrace = StringBuilder()
     internal fun trace(event: String) {
+        val line = android.os.SystemClock.elapsedRealtime().toString() + " [" + Thread.currentThread().name + "] " + event
+        android.util.Log.i("UFTrace", line)
         synchronized(debugTrace) {
-            if (debugTrace.length < 6000) {
-                debugTrace.append(android.os.SystemClock.elapsedRealtime()).append(' ').append(event).append('\n')
+            if (debugTrace.length < 12000) {
+                debugTrace.append(line).append('\n')
             }
         }
     }
@@ -133,7 +135,7 @@ object AppUpdate {
         val info = runCatching {
             val manifestUrl = findAssetUrl(get(releaseUrl), MANIFEST_ASSET_NAME) ?: return@runCatching null
             parseManifest(get(manifestUrl))
-        }.getOrNull()
+        }.onFailure { trace("fetch error ${it.javaClass.simpleName}: ${it.message}") }.getOrNull()
         debugLastFetch = "url=$releaseUrl found=${info != null}"
         trace("fetch exit found=${info != null}")
         info
