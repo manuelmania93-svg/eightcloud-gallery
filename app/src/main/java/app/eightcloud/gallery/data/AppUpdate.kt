@@ -248,18 +248,29 @@ object AppUpdate {
      */
     fun verifyApk(context: Context, apk: File, installedVersionCode: Long): Boolean {
         val pm = context.packageManager
-        val info = packageArchiveInfo(pm, apk.absolutePath) ?: return false
+        val info = packageArchiveInfo(pm, apk.absolutePath)
+        if (info == null) {
+            trace("verifyApk: getPackageArchiveInfo returned null for ${apk.absolutePath}")
+            return false
+        }
         val apkVersionCode =
             if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
-        val apkSigner = info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray() ?: return false
+        val apkSigner = info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
         val ownSigner = packageInfo(pm, context.packageName)?.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
-        return checkCandidate(
-            CandidateApk(info.packageName, apkVersionCode, sha256(apkSigner)),
+        val candidate = CandidateApk(info.packageName, apkVersionCode, apkSigner?.let { sha256(it) } ?: ByteArray(0))
+        val result = checkCandidate(
+            candidate,
             context.packageName,
             installedVersionCode,
             ownSigner?.let { sha256(it) },
         )
+        trace("verifyApk: pkg=${info.packageName} vc=$apkVersionCode installed=$installedVersionCode " +
+            "signingInfo=${info.signingInfo != null} signer=${apkSigner?.let { hex(sha256(it)) } ?: "null"} " +
+            "ownSigner=${ownSigner?.let { hex(sha256(it)) } ?: "null"} result=$result")
+        return result
     }
+
+    private fun hex(data: ByteArray): String = data.joinToString("") { "%02x".format(it) }
 
     private fun packageArchiveInfo(pm: PackageManager, path: String): PackageInfo? =
         if (Build.VERSION.SDK_INT >= 33) {
