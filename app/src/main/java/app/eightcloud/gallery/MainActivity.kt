@@ -18,7 +18,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import app.eightcloud.gallery.data.AppUpdate
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -45,17 +44,10 @@ import app.eightcloud.gallery.ui.ViewerScreen
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        AppUpdate.debugActivityCreates++
-        AppUpdate.trace("onCreate")
         enableEdgeToEdge()
         setContent {
             EightCloudApp()
         }
-    }
-
-    override fun onDestroy() {
-        AppUpdate.trace("onDestroy isFinishing=$isFinishing")
-        super.onDestroy()
     }
 }
 
@@ -75,7 +67,6 @@ private fun requiredPermissions(): Array<String> = when {
 @Composable
 fun EightCloudApp() {
     val viewModel: GalleryViewModel = viewModel()
-    SideEffect { AppUpdate.debugScreenVm = viewModel.hashCode(); AppUpdate.trace("sideEffect vm=${viewModel.hashCode()}") }
     val themeMode by viewModel.themeMode.collectAsState()
     val permissionGranted by viewModel.permissionGranted.collectAsState()
     val screen by viewModel.screen.collectAsState()

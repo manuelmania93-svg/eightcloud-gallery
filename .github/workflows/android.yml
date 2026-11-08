@@ -151,7 +151,6 @@ jobs:
           ls -la update-evidence/ || true
           find update-evidence -name '*:*' -delete
           # Console redundancy: if artifact upload fails again the evidence survives in the run log.
-          echo '== logcat-uftrace.txt =='; cat update-evidence/logcat-uftrace.txt 2>/dev/null || true
           for t in update-evidence/trace-*.txt; do [ -f "$t" ] && { echo "== $t =="; cat "$t"; }; done || true
       - uses: actions/upload-artifact@v4
         if: always()

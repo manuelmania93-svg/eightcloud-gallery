@@ -60,28 +60,6 @@ object AppUpdate {
     internal var latestReleaseUrlOverride: String? = null
     internal var allowedApkUrlPrefixOverride: String? = null
 
-    // CI diagnostics, read by UpdateFlowTest failure messages to pin a failure to the
-    // click path (count never moves) or the fetch path (lastFetch names url + outcome).
-    @Volatile internal var debugCheckCount: Int = 0
-    @Volatile internal var debugLastFetch: String? = null
-    // Identity diagnostics: a screenVm/checkVm mismatch (or creates climbing mid-test)
-    // proves the tap reached a cleared ViewModel after an activity recreation.
-    @Volatile internal var debugActivityCreates: Int = 0
-    @Volatile internal var debugScreenVm: Int = 0
-    @Volatile internal var debugLastCheckVm: Int = 0
-
-    // Timestamped event trace of the whole check path (test-only diagnostics).
-    internal val debugTrace = StringBuilder()
-    internal fun trace(event: String) {
-        val line = android.os.SystemClock.elapsedRealtime().toString() + " [" + Thread.currentThread().name + "] " + event
-        android.util.Log.i("UFTrace", line)
-        synchronized(debugTrace) {
-            if (debugTrace.length < 12000) {
-                debugTrace.append(line).append('\n')
-            }
-        }
-    }
-
     fun currentVersionCode(context: Context): Long {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
@@ -131,14 +109,10 @@ object AppUpdate {
      */
     suspend fun fetchLatest(): UpdateInfo? = withContext(Dispatchers.IO) {
         val releaseUrl = latestReleaseUrlOverride ?: LATEST_RELEASE_URL
-        trace("fetch entry url=$releaseUrl")
-        val info = runCatching {
+        return@withContext runCatching {
             val manifestUrl = findAssetUrl(get(releaseUrl), MANIFEST_ASSET_NAME) ?: return@runCatching null
             parseManifest(get(manifestUrl))
-        }.onFailure { trace("fetch error ${it.javaClass.simpleName}: ${it.message}") }.getOrNull()
-        debugLastFetch = "url=$releaseUrl found=${info != null}"
-        trace("fetch exit found=${info != null}")
-        info
+        }.getOrNull()
     }
 
     private fun get(url: String): String {
@@ -248,29 +222,19 @@ object AppUpdate {
      */
     fun verifyApk(context: Context, apk: File, installedVersionCode: Long): Boolean {
         val pm = context.packageManager
-        val info = packageArchiveInfo(pm, apk.absolutePath)
-        if (info == null) {
-            trace("verifyApk: getPackageArchiveInfo returned null for ${apk.absolutePath}")
-            return false
-        }
+        val info = packageArchiveInfo(pm, apk.absolutePath) ?: return false
         val apkVersionCode =
             if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
         val apkSigner = firstSigner(info)
         val ownSigner = packageInfo(pm, context.packageName)?.let { firstSigner(it) }
         val candidate = CandidateApk(info.packageName, apkVersionCode, apkSigner?.let { sha256(it) } ?: ByteArray(0))
-        val result = checkCandidate(
+        return checkCandidate(
             candidate,
             context.packageName,
             installedVersionCode,
             ownSigner?.let { sha256(it) },
         )
-        trace("verifyApk: pkg=${info.packageName} vc=$apkVersionCode installed=$installedVersionCode " +
-            "signingInfo=${info.signingInfo != null} signer=${apkSigner?.let { hex(sha256(it)) } ?: "null"} " +
-            "ownSigner=${ownSigner?.let { hex(sha256(it)) } ?: "null"} result=$result")
-        return result
     }
-
-    private fun hex(data: ByteArray): String = data.joinToString("") { "%02x".format(it) }
 
     // API 29 quirk, proven on the CI emulator (run 42453757686): getPackageArchiveInfo
     // with GET_SIGNING_CERTIFICATES returns signingInfo=NULL for a valid v1+v2 signed
@@ -322,7 +286,6 @@ object AppUpdate {
     /** Hands the verified APK to the system package installer; the user confirms the sheet. */
     fun promptInstall(context: Context, apk: File) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
-        trace("promptInstall uri=$uri")
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)

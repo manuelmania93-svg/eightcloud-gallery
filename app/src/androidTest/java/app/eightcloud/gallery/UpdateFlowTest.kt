@@ -76,9 +76,6 @@ class UpdateFlowTest {
         // composition runs but layout never places anything (zero-bounds nodes whose
         // clicks silently no-op - the tap failure in runs 42445755149/42446867338/42448007797).
         val instr = InstrumentationRegistry.getInstrumentation()
-        val km = instr.targetContext.getSystemService(android.app.KeyguardManager::class.java)
-        val pm = instr.targetContext.getSystemService(android.os.PowerManager::class.java)
-        AppUpdate.trace("keyguard locked=${km?.isKeyguardLocked} interactive=${pm?.isInteractive}")
         runCatching { instr.uiAutomation.executeShellCommand("wm dismiss-keyguard")?.close() }
         runCatching { UiDevice.getInstance(instr).wakeUp() }
     }
@@ -98,15 +95,14 @@ class UpdateFlowTest {
     @Before
     fun setUp() {
         testName = "unknown"
-        AppUpdate.trace("evidence dir=${evidenceDir.absolutePath} mkdirs=${evidenceDir.mkdirs() || evidenceDir.exists()}")
+        evidenceDir.mkdirs()
         AppUpdate.allowedApkUrlPrefixOverride = "$fixtureBase/"
     }
 
     @After
     fun tearDown() {
-        scenario?.close() // close first so the onDestroy trace lands in the dump
+        scenario?.close()
         scenario = null
-        dumpTrace("-end")
         AppUpdate.latestReleaseUrlOverride = null
         AppUpdate.allowedApkUrlPrefixOverride = null
     }
@@ -142,9 +138,8 @@ class UpdateFlowTest {
             waitText("Update available: 0.15.0")
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("grid-banner-missing")
-            dumpTrace("-fail")
             throw AssertionError("startup silent check did not surface the grid banner; " +
-                "tree: " + describeTree() + "; " + diagShort(), e)
+                "tree: " + describeTree(), e)
         }
         shot("grid-banner-available")
     }
@@ -183,24 +178,6 @@ class UpdateFlowTest {
 
     private var testName = "unknown"
 
-    // The console printer can eat long assertion payloads (run 42442949928 lost the whole
-    // trace block AND the stack frame), so the full trace + counters go to an evidence FILE
-    // that the driver pulls from /sdcard - a channel nothing in the console path can truncate.
-    private fun dumpTrace(suffix: String) {
-        try {
-            File(evidenceDir, "trace-$testName$suffix-${System.currentTimeMillis()}.txt").writeText(diag())
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun diag(): String =
-        "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch} " +
-        "creates=${AppUpdate.debugActivityCreates} screenVm=${AppUpdate.debugScreenVm} checkVm=${AppUpdate.debugLastCheckVm}\ntrace:\n" + AppUpdate.debugTrace.toString()
-
-    private fun diagShort(): String =
-        "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch} " +
-        "creates=${AppUpdate.debugActivityCreates} screenVm=${AppUpdate.debugScreenVm} checkVm=${AppUpdate.debugLastCheckVm}"
-
     // Every testTag + visible text in the unmerged semantics tree, for failure messages.
     private fun describeTree(): String {
         val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode()
@@ -238,9 +215,8 @@ class UpdateFlowTest {
             waitTag("update_check")
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-never-idle")
-            dumpTrace("-fail")
             throw AssertionError("startup check against the local fixture never settled to Idle; " +
-                "tree: " + describeTree() + "; " + diagShort(), e)
+                "tree: " + describeTree(), e)
         }
 
         useFixture("good")
@@ -257,31 +233,23 @@ class UpdateFlowTest {
         composeRule.onNodeWithTag("update_check").performScrollTo()
         composeRule.waitForIdle()
         val tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
-        AppUpdate.trace("tap-pre: nodes=${tapNodes.size} bounds=${tapNodes.map { it.boundsInRoot }} " +
-            "roots=${composeRule.onAllNodes(androidx.compose.ui.test.isRoot(), useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }} " +
-            "hasOnClick=${tapNodes.map { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnClick) != null }} " +
-            "checks=${AppUpdate.debugCheckCount}")
-        val checksBeforeTap = AppUpdate.debugCheckCount
         composeRule.onNodeWithTag("update_check").performClick()
         composeRule.waitForIdle()
-        AppUpdate.trace("tap-post-compose: checks=${AppUpdate.debugCheckCount} before=$checksBeforeTap")
-        if (AppUpdate.debugCheckCount == checksBeforeTap) {
-            // Semantics dispatch never fired the handler: try a REAL input event at the
-            // node's on-screen center to separate "dispatch lost" from "handler dead".
-            val b = tapNodes.first().boundsInRoot
-            AppUpdate.trace("tap-uiautomator at ${b.center.x.toInt()},${b.center.y.toInt()}")
+        if (tapNodes.firstOrNull()?.boundsInRoot?.let { it.width <= 0f || it.height <= 0f } != false) {
+            // The row must have been scrolled into view above; a zero-bounds node means
+            // the click hit an empty rect and silently no-oped (run 42450633898). Fall
+            // back to a real input event at the (re-scrolled) node's center.
+            val b = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().first().boundsInRoot
             device.click(b.center.x.toInt(), b.center.y.toInt())
             composeRule.waitForIdle()
-            AppUpdate.trace("tap-post-uiautomator: checks=${AppUpdate.debugCheckCount}")
         }
         shot("settings-after-check-tap")
         try {
             waitTag("update_download")
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-stuck-no-download")
-            dumpTrace("-fail")
             throw AssertionError("manual check never surfaced update_download; " +
-                "tree: " + describeTree() + "; " + diagShort(), e)
+                "tree: " + describeTree(), e)
         }
         shot("settings-update-available")
         composeRule.onNodeWithTag("update_download").performClick()
@@ -292,9 +260,8 @@ class UpdateFlowTest {
             waitTag("update_install", 120_000)
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-no-install")
-            dumpTrace("-noinstall")
             throw AssertionError("download never reached update_install; " +
-                "tree: " + describeTree() + "; " + diagShort(), e)
+                "tree: " + describeTree(), e)
         }
         shot("settings-ready-to-install")
         composeRule.onNodeWithTag("update_install").performClick()
@@ -312,9 +279,7 @@ class UpdateFlowTest {
             if (toggle != null) {
                 toggle.click()
                 Thread.sleep(500)
-                AppUpdate.trace("grant toggle clicked checked=${toggle.isChecked}")
             } else {
-                AppUpdate.trace("grant toggle NOT FOUND, falling back to label click")
                 allowSwitch.click()
             }
             shot("unknown-sources-grant")

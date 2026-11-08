@@ -148,31 +148,19 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private var updateCheckedThisProcess = false
 
     fun checkForUpdate(silent: Boolean) {
-        AppUpdate.trace("check entry silent=$silent vm=${hashCode()} state=${_updateState.value} onMain=${android.os.Looper.getMainLooper().isCurrentThread}")
         if (_updateState.value == UpdateState.Checking || _updateState.value is UpdateState.Downloading) {
-            AppUpdate.trace("check guard-return")
             return
         }
-        AppUpdate.debugCheckCount++
-        AppUpdate.debugLastCheckVm = hashCode()
         _updateState.value = UpdateState.Checking
-        AppUpdate.trace("check pre-launch")
         viewModelScope.launch {
-            AppUpdate.trace("coroutine started vm=${hashCode()}")
             val latest = AppUpdate.fetchLatest()
             val next = when {
                 latest == null -> if (silent) UpdateState.Idle else UpdateState.Failed(null)
                 AppUpdate.isNewer(latest, installedVersionCode) -> UpdateState.Available(latest)
                 else -> if (silent) UpdateState.Idle else UpdateState.UpToDate
             }
-            AppUpdate.trace("state <- $next vm=${hashCode()}")
             _updateState.value = next
         }
-    }
-
-    override fun onCleared() {
-        AppUpdate.trace("vm-cleared ${hashCode()}")
-        super.onCleared()
     }
 
     fun checkForUpdateOnce() {
@@ -189,24 +177,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             else -> null
         } ?: return
         viewModelScope.launch {
-            AppUpdate.trace("download entry vc=${info.versionCode} url=${info.apkUrl}")
             _updateState.value = UpdateState.Downloading(info, 0)
             _updateState.value = runCatching {
                 AppUpdate.download(getApplication(), info) { percent ->
-                    if (percent % 25 == 0) AppUpdate.trace("download progress $percent%")
                     _updateState.value = UpdateState.Downloading(info, percent)
                 }
             }.fold(
                 onSuccess = { apk ->
-                    val verified = AppUpdate.verifyApk(getApplication(), apk, installedVersionCode)
-                    AppUpdate.trace("download exit ok bytes=${apk.length()} verified=$verified")
-                    if (verified) UpdateState.ReadyToInstall(info, apk)
+                    if (AppUpdate.verifyApk(getApplication(), apk, installedVersionCode)) UpdateState.ReadyToInstall(info, apk)
                     else UpdateState.Failed(info)
                 },
-                onFailure = {
-                    AppUpdate.trace("download exit error ${it.javaClass.simpleName}: ${it.message}")
-                    UpdateState.Failed(info)
-                },
+                onFailure = { UpdateState.Failed(info) },
             )
         }
     }
@@ -214,7 +195,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun installUpdate() {
         val ready = _updateState.value as? UpdateState.ReadyToInstall ?: return
         val app = getApplication<Application>()
-        AppUpdate.trace("installUpdate canInstall=${AppUpdate.canInstall(app)}")
         if (AppUpdate.canInstall(app)) {
             AppUpdate.promptInstall(app, ready.apk)
         } else {
@@ -230,9 +210,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         pendingGrantReturn = false
         val state = _updateState.value
         val app = getApplication<Application>()
-        val canInstall = AppUpdate.canInstall(app)
-        AppUpdate.trace("resumeAfterGrant state=${state::class.simpleName} canInstall=$canInstall")
-        if (AppUpdate.shouldAutoPromptOnResume(true, state, canInstall)) {
+        if (AppUpdate.shouldAutoPromptOnResume(true, state, AppUpdate.canInstall(app))) {
             AppUpdate.promptInstall(app, (state as UpdateState.ReadyToInstall).apk)
         }
     }

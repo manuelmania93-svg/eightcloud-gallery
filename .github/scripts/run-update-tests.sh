@@ -27,12 +27,10 @@ cleanup() {
     case "$f" in *:*|*/*|"") continue;; esac
     timeout 30 adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug cat "files/update-evidence/$f" > "update-evidence/$f" 2>/dev/null || true
   done
-  adb -s emulator-5554 logcat -d -b all -s UFTrace:I > update-evidence/logcat-uftrace.txt 2>/dev/null || true
   adb -s emulator-5554 logcat -d > update-evidence/logcat.txt 2>/dev/null || true
   ls -la update-evidence/ || true
   # Console redundancy: the artifact upload validates filenames and fails atomically
   # (run 42449450554 lost everything to one bad name) - the log always survives.
-  echo '== logcat-uftrace.txt =='; cat update-evidence/logcat-uftrace.txt 2>/dev/null || true
   for t in update-evidence/trace-*.txt; do [ -f "$t" ] && { echo "== $t =="; cat "$t"; }; done || true
 }
 trap cleanup EXIT
