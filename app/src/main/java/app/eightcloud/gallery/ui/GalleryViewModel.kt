@@ -214,6 +214,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun installUpdate() {
         val ready = _updateState.value as? UpdateState.ReadyToInstall ?: return
         val app = getApplication<Application>()
+        AppUpdate.trace("installUpdate canInstall=${AppUpdate.canInstall(app)}")
         if (AppUpdate.canInstall(app)) {
             AppUpdate.promptInstall(app, ready.apk)
         } else {
@@ -229,7 +230,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         pendingGrantReturn = false
         val state = _updateState.value
         val app = getApplication<Application>()
-        if (AppUpdate.shouldAutoPromptOnResume(true, state, AppUpdate.canInstall(app))) {
+        val canInstall = AppUpdate.canInstall(app)
+        AppUpdate.trace("resumeAfterGrant state=${state::class.simpleName} canInstall=$canInstall")
+        if (AppUpdate.shouldAutoPromptOnResume(true, state, canInstall)) {
             AppUpdate.promptInstall(app, (state as UpdateState.ReadyToInstall).apk)
         }
     }

@@ -322,6 +322,7 @@ object AppUpdate {
     /** Hands the verified APK to the system package installer; the user confirms the sheet. */
     fun promptInstall(context: Context, apk: File) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
+        trace("promptInstall uri=$uri")
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)

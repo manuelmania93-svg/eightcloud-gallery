@@ -301,7 +301,21 @@ class UpdateFlowTest {
         // on resume (pendingGrantReturn).
         val allowSwitch = device.wait(Until.findObject(By.textContains("Allow from this source")), 5_000)
         if (allowSwitch != null) {
-            allowSwitch.click()
+            // Run 42454359780: clicking the row LABEL does not flip the switch on the
+            // API 29 grant page (screenshot showed it still OFF, the grant never
+            // happened, resume re-prompt stayed gated on canInstall=false). Click the
+            // actual switch widget and confirm it stuck.
+            val toggle = device.wait(Until.findObject(By.res("android:id/switch_widget")), 3_000)
+                ?: device.findObject(By.clazz("android.widget.Switch"))
+                ?: device.findObject(By.checkable(true))
+            if (toggle != null) {
+                toggle.click()
+                Thread.sleep(500)
+                AppUpdate.trace("grant toggle clicked checked=${toggle.isChecked}")
+            } else {
+                AppUpdate.trace("grant toggle NOT FOUND, falling back to label click")
+                allowSwitch.click()
+            }
             shot("unknown-sources-grant")
             device.pressBack()
         }
