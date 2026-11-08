@@ -120,7 +120,7 @@ jobs:
           target: default
           arch: x86_64
           profile: Nexus 6
-          # Fixture A installs at versionCode 2; the update test installs B (3) over it.
+          # Fixture A installs at versionCode 2; the controller drives B (3) over it.
           # The fixtures are served from the HOST; adb reverse bridges the emulator's
           # loopback to it, so the guest never binds a socket (EPERM on this emulator).
           script: |
@@ -129,7 +129,15 @@ jobs:
             trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
             sleep 1
             adb -s emulator-5554 reverse tcp:8799 tcp:8799
-            timeout 22m ./gradlew connectedDebugAndroidTest -PeightcloudVersionCode=2 --stacktrace
+            # 1) App-side flow, stops at the system install sheet (never replaced under
+            #    its own instrumentation - the runner lives in the app process).
+            timeout 15m ./gradlew :app:connectedDebugAndroidTest -PeightcloudVersionCode=2 --stacktrace
+            # 2) External controller (own package/process): drives the sheet's UPDATE,
+            #    survives the replacement, asserts vc==3 + stable cert from PackageManager.
+            timeout 10m ./gradlew :install-controller:connectedDebugAndroidTest --stacktrace
+            # 3) Belt-and-braces host-side assertion of the actual replacement.
+            adb shell dumpsys package app.eightcloud.gallery.debug | grep -m1 'versionCode=3 '
+            adb shell screencap -p /sdcard/update-evidence/host-post-replacement.png
       - name: Pull update-flow evidence
         if: always()
         run: |

@@ -27,8 +27,6 @@ import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.MethodSorters
-import org.junit.FixMethodOrder
 
 /**
  * On-device A->B update handoff fixture, fully isolated on the emulator:
@@ -43,9 +41,6 @@ import org.junit.FixMethodOrder
  * b.apk = candidate B (versionCode 3, stable key); c.apk = B re-signed with a throwaway key.
  */
 @RunWith(AndroidJUnit4::class)
-// The A->B install replaces the app under instrumentation and kills its process;
-// run it LAST so no later rule cleanup or test can hang on the dead activity.
-@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class UpdateFlowTest {
 
     private val composeRule = createAndroidComposeRule<MainActivity>()
@@ -112,7 +107,7 @@ class UpdateFlowTest {
     }
 
     @Test
-    fun zz_last_installsVerifiedNewerApk() {
+    fun handoffToSystemInstaller() {
         val target = InstrumentationRegistry.getInstrumentation().targetContext
         val installedBefore = target.packageManager.getPackageInfo(target.packageName, 0).longVersionCode
         assertEquals("fixture A is versionCode 2", 2L, installedBefore)
@@ -140,21 +135,15 @@ class UpdateFlowTest {
             shot("unknown-sources-grant")
             device.pressBack()
         }
-        // System installer button casing varies by API level ("Update" vs "UPDATE"),
-        // so poll exact variants instead of relying on a regex selector.
+        // System installer button casing varies by API level ("Update" vs "UPDATE").
         val sheet = waitAnyText(device, 15_000, "Update", "UPDATE")
         assertNotNull("system install sheet shows UPDATE", sheet)
         shot("system-install-sheet")
-        sheet!!.click()
-        val done = waitAnyText(device, 60_000, "Done", "DONE", "App updated", "APP UPDATED", "UPDATED")
-        assertNotNull("install completed", done)
-        shot("install-done")
-        done!!.click()
-
-        val installedAfter = target.packageManager.getPackageInfo(target.packageName, 0).longVersionCode
-        assertEquals("A->B install handoff landed", 3L, installedAfter)
+        // STOP at the handoff: the app must never be replaced under its own
+        // instrumentation (the runner lives in the app process and would die with it,
+        // hanging am instrument -w). The separate :install-controller instrumentation
+        // owns the sheet's UPDATE button and the post-replacement assertions.
     }
-
     @Test
     fun rejectsBadSha256() {
         useFixture("badsha")
