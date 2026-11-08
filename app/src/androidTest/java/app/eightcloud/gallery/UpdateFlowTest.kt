@@ -86,8 +86,8 @@ class UpdateFlowTest {
 
     @Before
     fun setUp() {
-        evidenceDir.mkdirs()
         testName = "unknown"
+        AppUpdate.trace("evidence dir=${evidenceDir.absolutePath} mkdirs=${evidenceDir.mkdirs() || evidenceDir.exists()}")
         AppUpdate.allowedApkUrlPrefixOverride = "$fixtureBase/"
     }
 
@@ -229,7 +229,26 @@ class UpdateFlowTest {
         }
 
         useFixture("good")
+        // Run 42445755149's UFTrace proved the tap never reaches checkForUpdate (zero
+        // silent=false entries; checks=3 = the three startup checks only). Instrument the
+        // dispatch boundary: node count, bounds, OnClick presence, counter before/after.
+        val tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
+        AppUpdate.trace("tap-pre: nodes=${tapNodes.size} bounds=${tapNodes.map { it.boundsInRoot }} " +
+            "hasOnClick=${tapNodes.map { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnClick) != null }} " +
+            "checks=${AppUpdate.debugCheckCount}")
+        val checksBeforeTap = AppUpdate.debugCheckCount
         composeRule.onNodeWithTag("update_check").performClick()
+        composeRule.waitForIdle()
+        AppUpdate.trace("tap-post-compose: checks=${AppUpdate.debugCheckCount} before=$checksBeforeTap")
+        if (AppUpdate.debugCheckCount == checksBeforeTap) {
+            // Semantics dispatch never fired the handler: try a REAL input event at the
+            // node's on-screen center to separate "dispatch lost" from "handler dead".
+            val b = tapNodes.first().boundsInRoot
+            AppUpdate.trace("tap-uiautomator at ${b.center.x.toInt()},${b.center.y.toInt()}")
+            device.click(b.center.x.toInt(), b.center.y.toInt())
+            composeRule.waitForIdle()
+            AppUpdate.trace("tap-post-uiautomator: checks=${AppUpdate.debugCheckCount}")
+        }
         shot("settings-after-check-tap")
         try {
             waitTag("update_download")
