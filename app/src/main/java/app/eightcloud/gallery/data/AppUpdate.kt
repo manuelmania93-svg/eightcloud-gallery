@@ -255,8 +255,8 @@ object AppUpdate {
         }
         val apkVersionCode =
             if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
-        val apkSigner = info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
-        val ownSigner = packageInfo(pm, context.packageName)?.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+        val apkSigner = firstSigner(info)
+        val ownSigner = packageInfo(pm, context.packageName)?.let { firstSigner(it) }
         val candidate = CandidateApk(info.packageName, apkVersionCode, apkSigner?.let { sha256(it) } ?: ByteArray(0))
         val result = checkCandidate(
             candidate,
@@ -272,12 +272,17 @@ object AppUpdate {
 
     private fun hex(data: ByteArray): String = data.joinToString("") { "%02x".format(it) }
 
+    // API 29 quirk, proven on the CI emulator (run 42453757686): getPackageArchiveInfo
+    // with GET_SIGNING_CERTIFICATES returns signingInfo=NULL for a valid v1+v2 signed
+    // archive (while getPackageInfo on the installed package fills it). Request the
+    // legacy GET_SIGNATURES too and fall back to the deprecated signatures array, or
+    // every update is rejected as unverifiable on those devices.
     private fun packageArchiveInfo(pm: PackageManager, path: String): PackageInfo? =
         if (Build.VERSION.SDK_INT >= 33) {
             pm.getPackageArchiveInfo(path, PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()))
         } else {
             @Suppress("DEPRECATION")
-            pm.getPackageArchiveInfo(path, PackageManager.GET_SIGNING_CERTIFICATES)
+            pm.getPackageArchiveInfo(path, PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES)
         }
 
     private fun packageInfo(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
@@ -285,9 +290,14 @@ object AppUpdate {
             pm.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()))
         } else {
             @Suppress("DEPRECATION")
-            pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+            pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES)
         }
     }.getOrNull()
+
+    @Suppress("DEPRECATION")
+    private fun firstSigner(info: PackageInfo): ByteArray? =
+        info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+            ?: info.signatures?.firstOrNull()?.toByteArray()
 
     private fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
