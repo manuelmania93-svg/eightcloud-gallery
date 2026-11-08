@@ -34,13 +34,16 @@ class InstallControllerTest {
 
         // The app-side flow left the system install sheet on screen. If the sheet is
         // gone (e.g. the app process was reaped), fail loudly instead of pretending.
-        val sheet = waitAnyText(device, 30_000, "Update", "UPDATE")
+        // Pixel evidence (run 42455960836): this API 29 image labels the button INSTALL
+        // even for updates - "Do you want to install an update to this existing
+        // application?" with CANCEL / INSTALL.
+        val sheet = waitAnyText(device, 30_000, "Update", "UPDATE", "Install", "INSTALL")
         assertNotNull("system install sheet still present for the controller", sheet)
         device.takeScreenshot(File(evidenceDir, "controller-install-sheet.png"))
         sheet!!.click()
 
-        // Casing varies by API level; poll the known completion labels.
-        val done = waitAnyText(device, 90_000, "Done", "DONE", "App updated", "APP UPDATED", "UPDATED")
+        // Casing and wording vary by API level; poll the known completion labels.
+        val done = waitAnyText(device, 90_000, "Done", "DONE", "App updated", "APP UPDATED", "UPDATED", "App installed", "APP INSTALLED", "INSTALLED")
         assertNotNull("system installer reported completion", done)
         device.takeScreenshot(File(evidenceDir, "install-done.png"))
         done!!.click()
