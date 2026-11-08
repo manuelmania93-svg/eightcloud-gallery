@@ -1,11 +1,13 @@
 package app.eightcloud.gallery
 
 import android.os.Build
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -126,6 +128,21 @@ class UpdateFlowTest {
         }
     }
 
+    // Every testTag + visible text in the unmerged semantics tree, for failure messages.
+    private fun describeTree(): String {
+        val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode()
+        val parts = mutableListOf<String>()
+        fun walk(n: androidx.compose.ui.semantics.SemanticsNode) {
+            val tag = n.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)
+            val text = n.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)
+                ?.joinToString(" ") { it.text }
+            if (tag != null || !text.isNullOrBlank()) parts.add("tag=$tag text=$text")
+            n.children.forEach { walk(it) }
+        }
+        walk(root)
+        return parts.take(80).joinToString(" | ")
+    }
+
     @Test
     fun handoffToSystemInstaller() {
         val target = InstrumentationRegistry.getInstrumentation().targetContext
@@ -142,17 +159,30 @@ class UpdateFlowTest {
         // useFixture runs (run 42437557275: banner never appeared, timed out after 30s).
         // Drive an explicit check so the fixture is authoritative.
         composeRule.onNodeWithContentDescription("Settings").performClick()
+        shot("settings-opened")
+        // Wait until the startup silent check settles: Idle/UpToDate/Failed show
+        // update_check, a late fixture-visible startup check shows update_download.
         val deadline = android.os.SystemClock.uptimeMillis() + 30_000
+        var settledTag: String? = null
         while (android.os.SystemClock.uptimeMillis() < deadline) {
-            val settled = composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().isNotEmpty()
-            if (settled) break
+            if (composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isNotEmpty()) { settledTag = "update_download"; break }
+            if (composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().isNotEmpty()) { settledTag = "update_check"; break }
             Thread.sleep(250)
         }
-        if (composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isEmpty()) {
-            composeRule.onNodeWithTag("update_check").performClick()
+        if (settledTag == null) {
+            shot("settings-never-settled")
+            throw AssertionError("settings update section never settled (startup check stuck?): " + describeTree())
         }
-        waitTag("update_download")
+        if (settledTag == "update_check") {
+            composeRule.onNodeWithTag("update_check").performClick()
+            shot("settings-after-check-tap")
+        }
+        try {
+            waitTag("update_download")
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            shot("settings-stuck-no-download")
+            throw AssertionError("update_download never appeared after settled=$settledTag: " + describeTree(), e)
+        }
         shot("settings-update-available")
 
         // Grid banner proves discovery surfaced the update app-wide.
