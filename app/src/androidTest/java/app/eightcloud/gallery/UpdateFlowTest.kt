@@ -2,7 +2,7 @@ package app.eightcloud.gallery
 
 import android.os.Build
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -50,7 +50,7 @@ import org.junit.FixMethodOrder
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class UpdateFlowTest {
 
-    private val composeRule = createAndroidComposeRule<MainActivity>()
+    private val composeRule = createEmptyComposeRule()
 
     private val mediaPermissions: Array<String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) arrayOf(
@@ -62,6 +62,15 @@ class UpdateFlowTest {
     val chain: TestRule = RuleChain
         .outerRule(GrantPermissionRule.grant(*mediaPermissions))
         .around(composeRule)
+
+    // Launched explicitly per UI test AFTER the fixture override is set, so the
+    // startup silent check is authoritative against the local fixture and never
+    // touches the uncontrolled production URL (the race behind runs 42438678386,
+    // 42439412901, 42440060543).
+    private var scenario: androidx.test.core.app.ActivityScenario<MainActivity>? = null
+    private fun launch() {
+        scenario = androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
+    }
 
     private val evidenceDir = File("/sdcard/update-evidence")
 
@@ -76,6 +85,8 @@ class UpdateFlowTest {
 
     @After
     fun tearDown() {
+        scenario?.close()
+        scenario = null
         AppUpdate.latestReleaseUrlOverride = null
         AppUpdate.allowedApkUrlPrefixOverride = null
     }
@@ -98,6 +109,22 @@ class UpdateFlowTest {
     /** Point the updater at one of the CI-staged release manifests (release-<scenario>.json). */
     private fun useFixture(scenario: String) {
         AppUpdate.latestReleaseUrlOverride = "$fixtureBase/release-$scenario.json"
+    }
+
+    @Test
+    fun b_automaticDiscoveryShowsBanner() {
+        // Automatic path, proven with ZERO tapping: the fixture is authoritative before
+        // the activity exists, so the banner can only come from the startup silent check.
+        useFixture("good")
+        launch()
+        try {
+            waitText("Update available: 0.15.0")
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            shot("grid-banner-missing")
+            throw AssertionError("startup silent check did not surface the grid banner; " +
+                "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch}; tree: " + describeTree(), e)
+        }
+        shot("grid-banner-available")
     }
 
     private fun shot(name: String) {
@@ -145,51 +172,40 @@ class UpdateFlowTest {
 
     @Test
     fun handoffToSystemInstaller() {
+        // Manual path. The fixture is authoritative BEFORE launch: starting on the
+        // NOT-newer manifest settles the startup silent check at Idle deterministically
+        // (local fetch, no uncontrolled production URL), so the explicit tap below
+        // cannot be eaten by the Checking guard. Banner proof lives in
+        // b_automaticDiscoveryShowsBanner.
+        useFixture("old")
+        launch()
+
         val target = InstrumentationRegistry.getInstrumentation().targetContext
         val installedBefore = target.packageManager.getPackageInfo(target.packageName, 0).longVersionCode
         assertEquals("fixture A is versionCode 2", 2L, installedBefore)
 
-        useFixture("good")
-
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-
-        // The startup silent check (MainActivity LaunchedEffect -> checkForUpdateOnce)
-        // races the fixture override: the activity launches before this test body, so
-        // the startup check usually hits the production URL and lands on Idle before
-        // useFixture runs (run 42437557275: banner never appeared, timed out after 30s).
-        // Drive an explicit check so the fixture is authoritative.
         composeRule.onNodeWithContentDescription("Settings").performClick()
         shot("settings-opened")
-        // Retry the explicit tap: it can land while the startup check still holds
-        // Checking (checkForUpdate's guard silently returns - run 42439412901 showed
-        // the screen back at Idle with no fixture fetch after one tap), and a live-
-        // recomposing screen can eat a single click. Log the visible state each round.
-        val rounds = StringBuilder()
-        var downloadShown = false
-        val tapDeadline = android.os.SystemClock.uptimeMillis() + 60_000
-        while (android.os.SystemClock.uptimeMillis() < tapDeadline) {
-            if (composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isNotEmpty()) { downloadShown = true; break }
-            val hasCheck = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().isNotEmpty()
-            val checking = composeRule.onAllNodesWithText("Checking for updates", substring = true).fetchSemanticsNodes().isNotEmpty()
-            rounds.append("[check=$hasCheck checking=$checking]")
-            if (hasCheck && !checking) {
-                try { composeRule.onNodeWithTag("update_check").performClick() } catch (_: Exception) { rounds.append("(tap-failed)") }
-            }
-            Thread.sleep(3000)
+        try {
+            waitTag("update_check")
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            shot("settings-never-idle")
+            throw AssertionError("startup check against the local fixture never settled to Idle; " +
+                "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch}; tree: " + describeTree(), e)
         }
-        if (!downloadShown) {
+
+        useFixture("good")
+        composeRule.onNodeWithTag("update_check").performClick()
+        shot("settings-after-check-tap")
+        try {
+            waitTag("update_download")
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-stuck-no-download")
-            throw AssertionError("update_download never appeared; rounds: $rounds; tree: " + describeTree())
+            throw AssertionError("manual check never surfaced update_download; " +
+                "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch}; tree: " + describeTree(), e)
         }
         shot("settings-update-available")
-
-        // Grid banner proves discovery surfaced the update app-wide.
-        device.pressBack()
-        waitText("Update available: 0.15.0")
-        shot("grid-banner-available")
-
-        composeRule.onNodeWithContentDescription("Settings").performClick()
-        waitTag("update_download")
         composeRule.onNodeWithTag("update_download").performClick()
         waitTag("update_install")
         shot("settings-ready-to-install")

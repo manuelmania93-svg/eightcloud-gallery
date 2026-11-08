@@ -60,6 +60,11 @@ object AppUpdate {
     internal var latestReleaseUrlOverride: String? = null
     internal var allowedApkUrlPrefixOverride: String? = null
 
+    // CI diagnostics, read by UpdateFlowTest failure messages to pin a failure to the
+    // click path (count never moves) or the fetch path (lastFetch names url + outcome).
+    @Volatile internal var debugCheckCount: Int = 0
+    @Volatile internal var debugLastFetch: String? = null
+
     fun currentVersionCode(context: Context): Long {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
@@ -108,10 +113,13 @@ object AppUpdate {
      * the release carries no manifest (older releases) - both are "no update info", not errors.
      */
     suspend fun fetchLatest(): UpdateInfo? = withContext(Dispatchers.IO) {
-        runCatching {
-            val manifestUrl = findAssetUrl(get(latestReleaseUrlOverride ?: LATEST_RELEASE_URL), MANIFEST_ASSET_NAME) ?: return@runCatching null
+        val releaseUrl = latestReleaseUrlOverride ?: LATEST_RELEASE_URL
+        val info = runCatching {
+            val manifestUrl = findAssetUrl(get(releaseUrl), MANIFEST_ASSET_NAME) ?: return@runCatching null
             parseManifest(get(manifestUrl))
         }.getOrNull()
+        debugLastFetch = "url=$releaseUrl found=${info != null}"
+        info
     }
 
     private fun get(url: String): String {

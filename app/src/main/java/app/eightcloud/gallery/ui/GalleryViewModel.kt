@@ -149,6 +149,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun checkForUpdate(silent: Boolean) {
         if (_updateState.value == UpdateState.Checking || _updateState.value is UpdateState.Downloading) return
+        AppUpdate.debugCheckCount++
         _updateState.value = UpdateState.Checking
         viewModelScope.launch {
             val latest = AppUpdate.fetchLatest()
