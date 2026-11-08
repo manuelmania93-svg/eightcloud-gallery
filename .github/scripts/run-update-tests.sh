@@ -18,15 +18,22 @@ cleanup() {
   # Screenshots are captured as the SHELL uid into /data/local/tmp (via UiAutomation
   # executeShellCommand in the test) - the one storage path plain adb pull can read.
   for f in $(adb -s emulator-5554 shell 'ls /data/local/tmp/uf-*.png /data/local/tmp/host-post-replacement.png 2>/dev/null' | tr -d '\r'); do
+    case "$f" in */*.png) ;; *) continue;; esac
     timeout 30 adb -s emulator-5554 pull "$f" update-evidence/ || true
   done
   # Trace files live in the app's internal files dir; copy out one by one via run-as
   # (app uid) - tar is not guaranteed on the API 29 image.
   for f in $(adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug ls files/update-evidence/ 2>/dev/null | tr -d '\r'); do
+    case "$f" in *:*|*/*|"") continue;; esac
     timeout 30 adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug cat "files/update-evidence/$f" > "update-evidence/$f" 2>/dev/null || true
   done
   adb -s emulator-5554 logcat -d -b all -s UFTrace:I > update-evidence/logcat-uftrace.txt 2>/dev/null || true
   adb -s emulator-5554 logcat -d > update-evidence/logcat.txt 2>/dev/null || true
+  ls -la update-evidence/ || true
+  # Console redundancy: the artifact upload validates filenames and fails atomically
+  # (run 42449450554 lost everything to one bad name) - the log always survives.
+  echo '== logcat-uftrace.txt =='; cat update-evidence/logcat-uftrace.txt 2>/dev/null || true
+  for t in update-evidence/trace-*.txt; do [ -f "$t" ] && { echo "== $t =="; cat "$t"; }; done
 }
 trap cleanup EXIT
 
