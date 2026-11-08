@@ -122,7 +122,7 @@ class UpdateFlowTest {
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("grid-banner-missing")
             throw AssertionError("startup silent check did not surface the grid banner; " +
-                " + diag() + "; tree: " + describeTree(), e)
+                "tree: " + describeTree() + "; " + diag(), e)
         }
         shot("grid-banner-available")
     }
@@ -196,7 +196,7 @@ class UpdateFlowTest {
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-never-idle")
             throw AssertionError("startup check against the local fixture never settled to Idle; " +
-                " + diag() + "; tree: " + describeTree(), e)
+                "tree: " + describeTree() + "; " + diag(), e)
         }
 
         useFixture("good")
@@ -207,7 +207,7 @@ class UpdateFlowTest {
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-stuck-no-download")
             throw AssertionError("manual check never surfaced update_download; " +
-                " + diag() + "; tree: " + describeTree(), e)
+                "tree: " + describeTree() + "; " + diag(), e)
         }
         shot("settings-update-available")
         composeRule.onNodeWithTag("update_download").performClick()
