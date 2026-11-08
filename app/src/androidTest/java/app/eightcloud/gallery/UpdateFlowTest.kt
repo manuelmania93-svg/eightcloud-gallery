@@ -160,28 +160,26 @@ class UpdateFlowTest {
         // Drive an explicit check so the fixture is authoritative.
         composeRule.onNodeWithContentDescription("Settings").performClick()
         shot("settings-opened")
-        // Wait until the startup silent check settles: Idle/UpToDate/Failed show
-        // update_check, a late fixture-visible startup check shows update_download.
-        val deadline = android.os.SystemClock.uptimeMillis() + 30_000
-        var settledTag: String? = null
-        while (android.os.SystemClock.uptimeMillis() < deadline) {
-            if (composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isNotEmpty()) { settledTag = "update_download"; break }
-            if (composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().isNotEmpty()) { settledTag = "update_check"; break }
-            Thread.sleep(250)
+        // Retry the explicit tap: it can land while the startup check still holds
+        // Checking (checkForUpdate's guard silently returns - run 42439412901 showed
+        // the screen back at Idle with no fixture fetch after one tap), and a live-
+        // recomposing screen can eat a single click. Log the visible state each round.
+        val rounds = StringBuilder()
+        var downloadShown = false
+        val tapDeadline = android.os.SystemClock.uptimeMillis() + 60_000
+        while (android.os.SystemClock.uptimeMillis() < tapDeadline) {
+            if (composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isNotEmpty()) { downloadShown = true; break }
+            val hasCheck = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().isNotEmpty()
+            val checking = composeRule.onAllNodesWithText("Checking for updates", substring = true).fetchSemanticsNodes().isNotEmpty()
+            rounds.append("[check=$hasCheck checking=$checking]")
+            if (hasCheck && !checking) {
+                try { composeRule.onNodeWithTag("update_check").performClick() } catch (_: Exception) { rounds.append("(tap-failed)") }
+            }
+            Thread.sleep(3000)
         }
-        if (settledTag == null) {
-            shot("settings-never-settled")
-            throw AssertionError("settings update section never settled (startup check stuck?): " + describeTree())
-        }
-        if (settledTag == "update_check") {
-            composeRule.onNodeWithTag("update_check").performClick()
-            shot("settings-after-check-tap")
-        }
-        try {
-            waitTag("update_download")
-        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+        if (!downloadShown) {
             shot("settings-stuck-no-download")
-            throw AssertionError("update_download never appeared after settled=$settledTag: " + describeTree(), e)
+            throw AssertionError("update_download never appeared; rounds: $rounds; tree: " + describeTree())
         }
         shot("settings-update-available")
 
