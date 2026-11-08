@@ -137,7 +137,7 @@ jobs:
         # emulator makes `adb logcat` wait for a device forever.
         timeout-minutes: 3
         run: |
-          timeout 60 adb -s emulator-5554 pull /sdcard/update-evidence/ update-evidence/ || true
+          timeout 60 adb -s emulator-5554 pull /sdcard/Android/data/app.eightcloud.gallery.debug/files/update-evidence/ update-evidence/ || true
           timeout 60 adb -s emulator-5554 logcat -d > update-evidence/logcat.txt 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()

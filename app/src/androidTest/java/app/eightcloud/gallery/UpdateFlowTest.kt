@@ -72,7 +72,14 @@ class UpdateFlowTest {
         scenario = androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
     }
 
-    private val evidenceDir = File("/sdcard/update-evidence")
+    // App-private external dir: writable under scoped storage without extra permissions.
+    // A raw /sdcard/update-evidence path silently failed on the API 29 emulator (mkdirs()
+    // returned false, so no trace files or screenshots ever landed - run 42444914399).
+    private val evidenceDir = File(
+        InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)
+            ?: InstrumentationRegistry.getInstrumentation().targetContext.filesDir,
+        "update-evidence"
+    )
 
     // Host-side fixture server (see the android-test CI job), bridged by adb reverse.
     private val fixtureBase = "http://127.0.0.1:8799"
