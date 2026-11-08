@@ -27,6 +27,8 @@ import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.rules.TestRule
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
+import org.junit.FixMethodOrder
 
 /**
  * On-device A->B update handoff fixture, fully isolated on the emulator:
@@ -41,6 +43,9 @@ import org.junit.runner.RunWith
  * b.apk = candidate B (versionCode 3, stable key); c.apk = B re-signed with a throwaway key.
  */
 @RunWith(AndroidJUnit4::class)
+// No self-replacement in this class anymore (the controller owns the actual install),
+// so alphabetical order is safe and puts the connectivity diagnostic first.
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class UpdateFlowTest {
 
     private val composeRule = createAndroidComposeRule<MainActivity>()
@@ -71,6 +76,21 @@ class UpdateFlowTest {
     fun tearDown() {
         AppUpdate.latestReleaseUrlOverride = null
         AppUpdate.allowedApkUrlPrefixOverride = null
+    }
+
+    @Test
+    fun a_fixtureServerReachable() {
+        // Decisive in-process connectivity proof: same loopback+adb-reverse path the
+        // updater uses, with the REAL exception as the failure message (an opaque
+        // fetchLatest==null cost a full CI cycle to diagnose in run 42427827872).
+        val body = try {
+            java.net.URL("$fixtureBase/release-good.json").openStream().use {
+                it.readBytes().toString(Charsets.UTF_8)
+            }
+        } catch (e: Exception) {
+            throw AssertionError("fixture server unreachable via adb reverse: " + e.javaClass.simpleName + ": " + e.message)
+        }
+        assertTrue("good manifest served", body.contains("manifest-good.json"))
     }
 
     /** Point the updater at one of the CI-staged release manifests (release-<scenario>.json). */
