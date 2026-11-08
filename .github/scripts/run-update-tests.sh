@@ -33,7 +33,7 @@ cleanup() {
   # Console redundancy: the artifact upload validates filenames and fails atomically
   # (run 42449450554 lost everything to one bad name) - the log always survives.
   echo '== logcat-uftrace.txt =='; cat update-evidence/logcat-uftrace.txt 2>/dev/null || true
-  for t in update-evidence/trace-*.txt; do [ -f "$t" ] && { echo "== $t =="; cat "$t"; }; done
+  for t in update-evidence/trace-*.txt; do [ -f "$t" ] && { echo "== $t =="; cat "$t"; }; done || true
 }
 trap cleanup EXIT
 

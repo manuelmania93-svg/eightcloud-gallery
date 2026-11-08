@@ -1,5 +1,11 @@
 plugins {
     id 'com.android.library'
+    // Without this the module silently compiled to ZERO tests: InstallControllerTest.kt
+    // was never built (compileDebugAndroidTestJavaWithJavac NO-SOURCE), and
+    // connectedDebugAndroidTest passed VACUOUSLY in 8s with no tests run - run
+    // 42455960836. The A->B replacement never executed and only the host-side dumpsys
+    // assertion caught it.
+    id 'org.jetbrains.kotlin.android'
 }
 
 android {
