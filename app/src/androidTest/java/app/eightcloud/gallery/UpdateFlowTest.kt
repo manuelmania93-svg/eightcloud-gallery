@@ -122,7 +122,7 @@ class UpdateFlowTest {
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("grid-banner-missing")
             throw AssertionError("startup silent check did not surface the grid banner; " +
-                "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch}; tree: " + describeTree(), e)
+                " + diag() + "; tree: " + describeTree(), e)
         }
         shot("grid-banner-available")
     }
@@ -154,6 +154,10 @@ class UpdateFlowTest {
             composeRule.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
         }
     }
+
+    private fun diag(): String =
+        "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch} " +
+        "creates=${AppUpdate.debugActivityCreates} screenVm=${AppUpdate.debugScreenVm} checkVm=${AppUpdate.debugLastCheckVm}"
 
     // Every testTag + visible text in the unmerged semantics tree, for failure messages.
     private fun describeTree(): String {
@@ -192,7 +196,7 @@ class UpdateFlowTest {
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-never-idle")
             throw AssertionError("startup check against the local fixture never settled to Idle; " +
-                "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch}; tree: " + describeTree(), e)
+                " + diag() + "; tree: " + describeTree(), e)
         }
 
         useFixture("good")
@@ -203,7 +207,7 @@ class UpdateFlowTest {
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             shot("settings-stuck-no-download")
             throw AssertionError("manual check never surfaced update_download; " +
-                "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch}; tree: " + describeTree(), e)
+                " + diag() + "; tree: " + describeTree(), e)
         }
         shot("settings-update-available")
         composeRule.onNodeWithTag("update_download").performClick()

@@ -64,6 +64,11 @@ object AppUpdate {
     // click path (count never moves) or the fetch path (lastFetch names url + outcome).
     @Volatile internal var debugCheckCount: Int = 0
     @Volatile internal var debugLastFetch: String? = null
+    // Identity diagnostics: a screenVm/checkVm mismatch (or creates climbing mid-test)
+    // proves the tap reached a cleared ViewModel after an activity recreation.
+    @Volatile internal var debugActivityCreates: Int = 0
+    @Volatile internal var debugScreenVm: Int = 0
+    @Volatile internal var debugLastCheckVm: Int = 0
 
     fun currentVersionCode(context: Context): Long {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
