@@ -232,17 +232,11 @@ class UpdateFlowTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("update_check").performScrollTo()
         composeRule.waitForIdle()
-        val tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
         composeRule.onNodeWithTag("update_check").performClick()
         composeRule.waitForIdle()
-        if (tapNodes.firstOrNull()?.boundsInRoot?.let { it.width <= 0f || it.height <= 0f } != false) {
-            // The row must have been scrolled into view above; a zero-bounds node means
-            // the click hit an empty rect and silently no-oped (run 42450633898). Fall
-            // back to a real input event at the (re-scrolled) node's center.
-            val b = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().first().boundsInRoot
-            device.click(b.center.x.toInt(), b.center.y.toInt())
-            composeRule.waitForIdle()
-        }
+        // NOTE: no post-click node re-fetch here - once the tap dispatches, the state
+        // leaves Idle and SettingsScreen replaces update_check with the Checking row,
+        // so the node is legitimately GONE (run 42457552320 proved this the hard way).
         shot("settings-after-check-tap")
         try {
             waitTag("update_download")
