@@ -70,6 +70,15 @@ class UpdateFlowTest {
     private var scenario: androidx.test.core.app.ActivityScenario<MainActivity>? = null
     private fun launch() {
         scenario = androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
+        // An API 29 emulator can sit at the KEYGUARD: the app window then never draws,
+        // composition runs but layout never places anything (zero-bounds nodes whose
+        // clicks silently no-op - the tap failure in runs 42445755149/42446867338/42448007797).
+        val instr = InstrumentationRegistry.getInstrumentation()
+        val km = instr.targetContext.getSystemService(android.app.KeyguardManager::class.java)
+        val pm = instr.targetContext.getSystemService(android.os.PowerManager::class.java)
+        AppUpdate.trace("keyguard locked=${km?.isKeyguardLocked} interactive=${pm?.isInteractive}")
+        runCatching { instr.uiAutomation.executeShellCommand("wm dismiss-keyguard")?.close() }
+        runCatching { UiDevice.getInstance(instr).wakeUp() }
     }
 
     // INTERNAL app files dir: writable by the instrumentation process (same uid as the
@@ -139,8 +148,12 @@ class UpdateFlowTest {
     }
 
     private fun shot(name: String) {
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        device.takeScreenshot(File(evidenceDir, "$name.png"))
+        val instr = InstrumentationRegistry.getInstrumentation()
+        // Shell-uid capture into /data/local/tmp: the ONE storage path both the shell can
+        // write and plain adb pull can read on this emulator (scoped storage hid every
+        // app-private path from adb pull; runs 42444914399/42446867338/42448007797).
+        runCatching { instr.uiAutomation.executeShellCommand("screencap -p /data/local/tmp/uf-$name.png")?.close() }
+        UiDevice.getInstance(instr).takeScreenshot(File(evidenceDir, "$name.png"))
     }
 
     private fun waitAnyText(device: UiDevice, timeoutMs: Long, vararg texts: String): androidx.test.uiautomator.UiObject2? {
@@ -244,6 +257,7 @@ class UpdateFlowTest {
             tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
         }
         AppUpdate.trace("tap-pre: nodes=${tapNodes.size} bounds=${tapNodes.map { it.boundsInRoot }} " +
+            "roots=${composeRule.onAllNodes(androidx.compose.ui.test.isRoot(), useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }} " +
             "hasOnClick=${tapNodes.map { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnClick) != null }} " +
             "checks=${AppUpdate.debugCheckCount}")
         val checksBeforeTap = AppUpdate.debugCheckCount

@@ -15,8 +15,16 @@ cleanup() {
   # storage paths on this emulator (FUSE per-uid filtering hid the external-files dir -
   # run 42446867338), so pull through run-as (app uid) as a tar stream.
   mkdir -p update-evidence
-  adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug tar -cf - -C files update-evidence > update-evidence.tar || true
-  if [ -s update-evidence.tar ]; then tar -xf update-evidence.tar -C update-evidence --strip-components=1 || true; fi
+  # Screenshots are captured as the SHELL uid into /data/local/tmp (via UiAutomation
+  # executeShellCommand in the test) - the one storage path plain adb pull can read.
+  for f in $(adb -s emulator-5554 shell 'ls /data/local/tmp/uf-*.png /data/local/tmp/host-post-replacement.png 2>/dev/null' | tr -d '\r'); do
+    timeout 30 adb -s emulator-5554 pull "$f" update-evidence/ || true
+  done
+  # Trace files live in the app's internal files dir; copy out one by one via run-as
+  # (app uid) - tar is not guaranteed on the API 29 image.
+  for f in $(adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug ls files/update-evidence/ 2>/dev/null | tr -d '\r'); do
+    timeout 30 adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug cat "files/update-evidence/$f" > "update-evidence/$f" 2>/dev/null || true
+  done
   adb -s emulator-5554 logcat -d -b all -s UFTrace:I > update-evidence/logcat-uftrace.txt 2>/dev/null || true
   adb -s emulator-5554 logcat -d > update-evidence/logcat.txt 2>/dev/null || true
 }
@@ -41,6 +49,5 @@ fi
 if [ "$RC" -eq 0 ]; then
   adb -s emulator-5554 shell dumpsys package app.eightcloud.gallery.debug | grep -m1 'versionCode=3 ' || RC=1
   adb -s emulator-5554 shell screencap -p /data/local/tmp/host-post-replacement.png || true
-  adb -s emulator-5554 pull /data/local/tmp/host-post-replacement.png update-evidence/ || true
 fi
 exit "$RC"
