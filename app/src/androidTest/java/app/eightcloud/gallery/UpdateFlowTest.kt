@@ -134,19 +134,38 @@ class UpdateFlowTest {
 
         useFixture("good")
 
-        // Grid banner proves silent once-per-process discovery found the update.
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+
+        // The startup silent check (MainActivity LaunchedEffect -> checkForUpdateOnce)
+        // races the fixture override: the activity launches before this test body, so
+        // the startup check usually hits the production URL and lands on Idle before
+        // useFixture runs (run 42437557275: banner never appeared, timed out after 30s).
+        // Drive an explicit check so the fixture is authoritative.
+        composeRule.onNodeWithContentDescription("Settings").performClick()
+        val deadline = android.os.SystemClock.uptimeMillis() + 30_000
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val settled = composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes().isNotEmpty()
+            if (settled) break
+            Thread.sleep(250)
+        }
+        if (composeRule.onAllNodesWithTag("update_download").fetchSemanticsNodes().isEmpty()) {
+            composeRule.onNodeWithTag("update_check").performClick()
+        }
+        waitTag("update_download")
+        shot("settings-update-available")
+
+        // Grid banner proves discovery surfaced the update app-wide.
+        device.pressBack()
         waitText("Update available: 0.15.0")
         shot("grid-banner-available")
 
         composeRule.onNodeWithContentDescription("Settings").performClick()
         waitTag("update_download")
-        shot("settings-update-available")
         composeRule.onNodeWithTag("update_download").performClick()
         waitTag("update_install")
         shot("settings-ready-to-install")
         composeRule.onNodeWithTag("update_install").performClick()
-
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         // First update needs the one-time unknown-sources grant; the app then re-prompts
         // on resume (pendingGrantReturn).
         val allowSwitch = device.wait(Until.findObject(By.textContains("Allow from this source")), 5_000)
