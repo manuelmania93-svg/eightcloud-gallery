@@ -11,15 +11,12 @@ SERVER_PID=$!
 cleanup() {
   kill "$SERVER_PID" 2>/dev/null || true
   # Pull evidence while the emulator is still alive (the runner kills it after us).
-  # Evidence lives in the APP-PRIVATE external dir (scoped storage on API 29 blocks raw
-  # /sdcard paths from the test process - run 42444914399 lost every trace file to that).
+  # Evidence lives in the app's INTERNAL files dir: adb shell cannot see app-private
+  # storage paths on this emulator (FUSE per-uid filtering hid the external-files dir -
+  # run 42446867338), so pull through run-as (app uid) as a tar stream.
   mkdir -p update-evidence
-  adb -s emulator-5554 pull /sdcard/Android/data/app.eightcloud.gallery.debug/files/update-evidence/ update-evidence/ || true
-  if [ -z "$(ls -A update-evidence 2>/dev/null)" ]; then
-    # run-as fallback (debuggable build): tar the dir through exec-out and unpack locally.
-    adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug tar -cf - files/update-evidence > update-evidence.tar 2>/dev/null || true
-    if [ -s update-evidence.tar ]; then tar -xf update-evidence.tar -C update-evidence --strip-components=1 || true; fi
-  fi
+  adb -s emulator-5554 exec-out run-as app.eightcloud.gallery.debug tar -cf - -C files update-evidence > update-evidence.tar || true
+  if [ -s update-evidence.tar ]; then tar -xf update-evidence.tar -C update-evidence --strip-components=1 || true; fi
   adb -s emulator-5554 logcat -d -b all -s UFTrace:I > update-evidence/logcat-uftrace.txt 2>/dev/null || true
   adb -s emulator-5554 logcat -d > update-evidence/logcat.txt 2>/dev/null || true
 }
@@ -43,7 +40,7 @@ fi
 # 3) Belt-and-braces host-side assertion of the actual replacement.
 if [ "$RC" -eq 0 ]; then
   adb -s emulator-5554 shell dumpsys package app.eightcloud.gallery.debug | grep -m1 'versionCode=3 ' || RC=1
-  adb -s emulator-5554 shell mkdir -p /sdcard/Android/data/app.eightcloud.gallery.debug/files/update-evidence || true
-  adb -s emulator-5554 shell screencap -p /sdcard/Android/data/app.eightcloud.gallery.debug/files/update-evidence/host-post-replacement.png || true
+  adb -s emulator-5554 shell screencap -p /data/local/tmp/host-post-replacement.png || true
+  adb -s emulator-5554 pull /data/local/tmp/host-post-replacement.png update-evidence/ || true
 fi
 exit "$RC"

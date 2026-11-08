@@ -229,10 +229,20 @@ class UpdateFlowTest {
         }
 
         useFixture("good")
-        // Run 42445755149's UFTrace proved the tap never reaches checkForUpdate (zero
-        // silent=false entries; checks=3 = the three startup checks only). Instrument the
-        // dispatch boundary: node count, bounds, OnClick presence, counter before/after.
-        val tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
+        // Run 42446867338 proved the tap node exists with an OnClick action but ZERO
+        // bounds (Rect.fromLTRB(0,0,0,0)) - composed, never laid out - and the semantics
+        // click silently no-ops on it. waitTag returns the moment the node EXISTS
+        // (composition), before any layout pass places it. Wait for PLACEMENT first.
+        composeRule.waitForIdle()
+        val placedDeadline = android.os.SystemClock.uptimeMillis() + 10_000
+        var tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
+        while (tapNodes.firstOrNull()?.boundsInRoot?.let { it.width <= 0f || it.height <= 0f } != false
+            && android.os.SystemClock.uptimeMillis() < placedDeadline) {
+            AppUpdate.trace("tap-wait-placed: bounds=${tapNodes.map { it.boundsInRoot }}")
+            Thread.sleep(250)
+            composeRule.waitForIdle()
+            tapNodes = composeRule.onAllNodesWithTag("update_check").fetchSemanticsNodes()
+        }
         AppUpdate.trace("tap-pre: nodes=${tapNodes.size} bounds=${tapNodes.map { it.boundsInRoot }} " +
             "hasOnClick=${tapNodes.map { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnClick) != null }} " +
             "checks=${AppUpdate.debugCheckCount}")
