@@ -17,8 +17,8 @@ cleanup() {
   mkdir -p update-evidence
   # Screenshots are captured as the SHELL uid into /data/local/tmp (via UiAutomation
   # executeShellCommand in the test) - the one storage path plain adb pull can read.
-  for f in $(adb -s emulator-5554 shell 'ls /data/local/tmp/uf-*.png /data/local/tmp/host-post-replacement.png 2>/dev/null' | tr -d '\r'); do
-    case "$f" in */*.png) ;; *) continue;; esac
+  for f in $(adb -s emulator-5554 shell 'ls /data/local/tmp/uf-* 2>/dev/null' | tr -d '\r'); do
+    case "$f" in /data/local/tmp/uf-*) ;; *) continue;; esac
     timeout 30 adb -s emulator-5554 pull "$f" update-evidence/ || true
   done
   # Trace files live in the app's internal files dir; copy out one by one via run-as
@@ -55,6 +55,6 @@ fi
 # 3) Belt-and-braces host-side assertion of the actual replacement.
 if [ "$RC" -eq 0 ]; then
   adb -s emulator-5554 shell dumpsys package app.eightcloud.gallery.debug | grep -m1 'versionCode=3 ' || RC=1
-  adb -s emulator-5554 shell screencap -p /data/local/tmp/host-post-replacement.png || true
+  adb -s emulator-5554 shell screencap -p /data/local/tmp/uf-host-post-replacement.png || true
 fi
 exit "$RC"

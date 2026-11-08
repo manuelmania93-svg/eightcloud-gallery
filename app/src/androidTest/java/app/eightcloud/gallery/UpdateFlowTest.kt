@@ -24,6 +24,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -319,8 +320,16 @@ class UpdateFlowTest {
             shot("unknown-sources-grant")
             device.pressBack()
         }
-        // System installer button casing varies by API level ("Update" vs "UPDATE").
-        val sheet = waitAnyText(device, 15_000, "Update", "UPDATE")
+        // System installer button casing and label vary ("Update" vs "UPDATE"; some
+        // builds show "Install"/"INSTALL" even for updates).
+        val sheet = waitAnyText(device, 15_000, "Update", "UPDATE", "Install", "INSTALL")
+        if (sheet == null) {
+            // PackageInstallerActivity DID start (logcat, run 42455172068), so the
+            // sheet is up but no candidate label matched. Capture pixels AND the window
+            // hierarchy - the real button label becomes evidence, not a guess.
+            shot("system-install-sheet-missing")
+            runCatching { device.dumpWindowHierarchy(File("/data/local/tmp/uf-install-sheet.xml")) }
+        }
         assertNotNull("system install sheet shows UPDATE", sheet)
         shot("system-install-sheet")
         // STOP at the handoff: the app must never be replaced under its own
