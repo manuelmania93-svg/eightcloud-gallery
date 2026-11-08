@@ -72,12 +72,12 @@ class UpdateFlowTest {
         scenario = androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
     }
 
-    // App-private external dir: writable under scoped storage without extra permissions.
-    // A raw /sdcard/update-evidence path silently failed on the API 29 emulator (mkdirs()
-    // returned false, so no trace files or screenshots ever landed - run 42444914399).
+    // INTERNAL app files dir: writable by the instrumentation process (same uid as the
+    // app), immune to scoped-storage mount-namespace filtering. The app-private EXTERNAL
+    // dir was invisible to adb shell on this emulator (FUSE per-uid view), and raw /sdcard
+    // was unwritable - both pull paths lost every file (runs 42444914399, 42446867338).
     private val evidenceDir = File(
-        InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)
-            ?: InstrumentationRegistry.getInstrumentation().targetContext.filesDir,
+        InstrumentationRegistry.getInstrumentation().targetContext.filesDir,
         "update-evidence"
     )
 
