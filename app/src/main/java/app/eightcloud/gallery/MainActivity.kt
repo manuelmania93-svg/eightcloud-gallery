@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppUpdate.debugActivityCreates++
+        AppUpdate.trace("onCreate")
         enableEdgeToEdge()
         setContent {
             EightCloudApp()
@@ -69,7 +70,7 @@ private fun requiredPermissions(): Array<String> = when {
 @Composable
 fun EightCloudApp() {
     val viewModel: GalleryViewModel = viewModel()
-    SideEffect { AppUpdate.debugScreenVm = viewModel.hashCode() }
+    SideEffect { AppUpdate.debugScreenVm = viewModel.hashCode(); AppUpdate.trace("sideEffect vm=${viewModel.hashCode()}") }
     val themeMode by viewModel.themeMode.collectAsState()
     val permissionGranted by viewModel.permissionGranted.collectAsState()
     val screen by viewModel.screen.collectAsState()

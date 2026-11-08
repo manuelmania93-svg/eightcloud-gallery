@@ -148,10 +148,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private var updateCheckedThisProcess = false
 
     fun checkForUpdate(silent: Boolean) {
-        if (_updateState.value == UpdateState.Checking || _updateState.value is UpdateState.Downloading) return
+        AppUpdate.trace("check entry silent=$silent vm=${hashCode()} state=${_updateState.value}")
+        if (_updateState.value == UpdateState.Checking || _updateState.value is UpdateState.Downloading) {
+            AppUpdate.trace("check guard-return")
+            return
+        }
         AppUpdate.debugCheckCount++
         AppUpdate.debugLastCheckVm = hashCode()
         _updateState.value = UpdateState.Checking
+        AppUpdate.trace("check pre-launch")
         viewModelScope.launch {
             val latest = AppUpdate.fetchLatest()
             _updateState.value = when {
@@ -160,6 +165,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 else -> if (silent) UpdateState.Idle else UpdateState.UpToDate
             }
         }
+    }
+
+    override fun onCleared() {
+        AppUpdate.trace("vm-cleared ${hashCode()}")
+        super.onCleared()
     }
 
     fun checkForUpdateOnce() {

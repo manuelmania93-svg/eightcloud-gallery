@@ -157,7 +157,7 @@ class UpdateFlowTest {
 
     private fun diag(): String =
         "checks=${AppUpdate.debugCheckCount} lastFetch=${AppUpdate.debugLastFetch} " +
-        "creates=${AppUpdate.debugActivityCreates} screenVm=${AppUpdate.debugScreenVm} checkVm=${AppUpdate.debugLastCheckVm}"
+        "creates=${AppUpdate.debugActivityCreates} screenVm=${AppUpdate.debugScreenVm} checkVm=${AppUpdate.debugLastCheckVm}\ntrace:\n" + AppUpdate.debugTrace.toString()
 
     // Every testTag + visible text in the unmerged semantics tree, for failure messages.
     private fun describeTree(): String {

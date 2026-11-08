@@ -70,6 +70,16 @@ object AppUpdate {
     @Volatile internal var debugScreenVm: Int = 0
     @Volatile internal var debugLastCheckVm: Int = 0
 
+    // Timestamped event trace of the whole check path (test-only diagnostics).
+    internal val debugTrace = StringBuilder()
+    internal fun trace(event: String) {
+        synchronized(debugTrace) {
+            if (debugTrace.length < 6000) {
+                debugTrace.append(android.os.SystemClock.elapsedRealtime()).append(' ').append(event).append('\n')
+            }
+        }
+    }
+
     fun currentVersionCode(context: Context): Long {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
@@ -119,11 +129,13 @@ object AppUpdate {
      */
     suspend fun fetchLatest(): UpdateInfo? = withContext(Dispatchers.IO) {
         val releaseUrl = latestReleaseUrlOverride ?: LATEST_RELEASE_URL
+        trace("fetch entry url=$releaseUrl")
         val info = runCatching {
             val manifestUrl = findAssetUrl(get(releaseUrl), MANIFEST_ASSET_NAME) ?: return@runCatching null
             parseManifest(get(manifestUrl))
         }.getOrNull()
         debugLastFetch = "url=$releaseUrl found=${info != null}"
+        trace("fetch exit found=${info != null}")
         info
     }
 
